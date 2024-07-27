@@ -3,6 +3,8 @@
 
 `Plugin.Maui.DebugOverlay` provides a simple ribbon to indicate the app is running in Debug mode.
 
+![screenshot of a mac app with the ribbon](images/mac_screenshot.png)
+
 ## Install Plugin
 
 [![NuGet](https://img.shields.io/nuget/v/Plugin.Maui.DebugOverlay.svg?label=NuGet)](https://www.nuget.org/packages/Plugin.Maui.DebugOverlay/)
