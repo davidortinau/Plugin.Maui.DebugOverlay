@@ -3,17 +3,17 @@ Everything in here is of course optional. If you want to add/remove something, a
 This example README has some dummy APIs you'll need to replace and only acts as a placeholder for some inspiration that you can fill in with your own functionalities.
 -->
 ![](nuget.png)
-# Plugin.Maui.Feature
+# Plugin.Maui.DebugOverlay
 
-`Plugin.Maui.Feature` provides the ability to do this amazing thing in your .NET MAUI application.
+`Plugin.Maui.DebugOverlay` provides the ability to do this amazing thing in your .NET MAUI application.
 
 ## Install Plugin
 
-[![NuGet](https://img.shields.io/nuget/v/Plugin.Maui.Feature.svg?label=NuGet)](https://www.nuget.org/packages/Plugin.Maui.Feature/)
+[![NuGet](https://img.shields.io/nuget/v/Plugin.Maui.DebugOverlay.svg?label=NuGet)](https://www.nuget.org/packages/Plugin.Maui.DebugOverlay/)
 
-Available on [NuGet](http://www.nuget.org/packages/Plugin.Maui.Feature).
+Available on [NuGet](http://www.nuget.org/packages/Plugin.Maui.DebugOverlay).
 
-Install with the dotnet CLI: `dotnet add package Plugin.Maui.Feature`, or through the NuGet Package Manager in Visual Studio.
+Install with the dotnet CLI: `dotnet add package Plugin.Maui.DebugOverlay`, or through the NuGet Package Manager in Visual Studio.
 
 ### Supported Platforms
 
@@ -26,7 +26,7 @@ Install with the dotnet CLI: `dotnet add package Plugin.Maui.Feature`, or throug
 
 ## API Usage
 
-`Plugin.Maui.Feature` provides the `Feature` class that has a single property `Property` that you can get or set.
+`Plugin.Maui.DebugOverlay` provides the `Feature` class that has a single property `Property` that you can get or set.
 
 You can either use it as a static class, e.g.: `Feature.Default.Property = 1` or with dependency injection: `builder.Services.AddSingleton<IFeature>(Feature.Default);`
 
