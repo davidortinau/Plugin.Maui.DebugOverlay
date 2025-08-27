@@ -25,27 +25,36 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private readonly Color _panelBackgroundColor;
     private readonly Color _buttonBackgroundColor;
     private readonly Color _textColor;
-    
+
     // Panel state management
     private enum PanelState { MainMenu, TreeView }
     private PanelState _currentState = PanelState.MainMenu;
     private List<TreeNode>? _currentTreeData = null;
-    
+
     private RectF _panelRect;
     private RectF _closeButtonRect;
     private RectF _visualTreeButtonRect;
     private RectF _shellHierarchyButtonRect;
     private RectF _headerRect;
     private RectF _backButtonRect;
-    
+    private RectF _scrollUpButtonRect;
+    private RectF _scrollDownButtonRect;
+    private RectF _exportButtonRect;
+
     // Tree view state
     private float _scrollOffset = 0f;
-    private const float LineHeight = 24f;
+    private const float LineHeight = 20f;
     private List<RectF> _treeNodeRects = new();
-    
-    // Tree view scroll offset
-    // (Removed unused panning fields since we simplified touch handling)
-    
+
+    // Touch-based scrolling state
+    private Point _touchStartPoint;
+    private DateTime _touchStartTime;
+    private bool _isScrolling = false;
+    private float _scrollVelocity = 0f;
+    private const float MinScrollDistance = 10f; // Minimum distance to trigger scroll
+    private const float ScrollSensitivity = 1.5f; // Scroll speed multiplier
+    private const float MaxScrollVelocity = 500f; // Maximum scroll velocity
+
     private string _mauiVersion;
     private bool _isVisible;
     private DateTime _lastButtonTapTime = DateTime.MinValue;
@@ -55,21 +64,23 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float ButtonSpacing = 8;
     private const float Padding = 12;
 
-    public bool IsVisible 
-    { 
-        get => _isVisible; 
-        set => _isVisible = value; 
+    public bool IsVisible
+    {
+        get => _isVisible;
+        set => _isVisible = value;
     }
 
     public DebugOverlayPanel(WindowOverlay overlay, Color panelBackgroundColor = null)
     {
+
         _overlay = overlay;
+
         _dumpService = new VisualTreeDumpService();
         _panelBackgroundColor = panelBackgroundColor ?? Color.FromArgb("#E0000000"); // Semi-transparent black
         _buttonBackgroundColor = Color.FromArgb("#FF4A4A4A"); // Dark gray buttons
         _textColor = Colors.White;
         _isVisible = false;
-        
+
         // Get MAUI version
         var version = typeof(MauiApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         _mauiVersion = version != null && version.Contains('+') ? version[..version.IndexOf('+')] : version ?? "Unknown";
@@ -133,14 +144,14 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             // Get safe area insets
             var (safeTop, safeBottom, safeLeft, safeRight) = GetSafeAreaInsets(dirtyRect);
-            
+
             // Panel background: edge-to-edge (full window)
             _panelRect = new RectF(0, 0, dirtyRect.Width, dirtyRect.Height);
 
             // Content area: within safe area + content padding
             var contentRect = new RectF(
                 safeLeft + ContentPadding,
-                safeTop + ContentPadding, 
+                safeTop + ContentPadding,
                 dirtyRect.Width - safeLeft - safeRight - (ContentPadding * 2),
                 dirtyRect.Height - safeTop - safeBottom - (ContentPadding * 2));
 
@@ -160,6 +171,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 DrawTreeViewHeader(canvas, contentRect);
                 DrawTreeView(canvas, contentRect);
                 DrawBackButton(canvas, contentRect);
+                DrawScrollButtons(canvas, contentRect);
             }
         }
         catch (Exception ex)
@@ -192,10 +204,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private void DrawHeader(ICanvas canvas, RectF contentRect)
     {
-        _headerRect = new RectF(contentRect.X, contentRect.Y, contentRect.Width, 40);
+        _headerRect = new RectF(contentRect.X, contentRect.Y, contentRect.Width, 50);
 
         canvas.SaveState();
-        
+
         // Header background
         canvas.FillColor = Color.FromArgb("#FF2D2D30");
         canvas.FillRoundedRectangle(_headerRect, 4);
@@ -204,7 +216,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.FontColor = _textColor;
         canvas.FontSize = 14;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
-        
+
         var headerText = $".NET MAUI {_mauiVersion}";
         canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Center, VerticalAlignment.Center);
 
@@ -218,12 +230,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Visual Tree Dump Button
         _visualTreeButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, _visualTreeButtonRect, "🔍 Dump Visual Tree", _buttonBackgroundColor);
+        DrawButton(canvas, _visualTreeButtonRect, "🔍 View Visual Tree", _buttonBackgroundColor);
 
         // Shell Hierarchy Button
         buttonY += ButtonHeight + ButtonSpacing;
         _shellHierarchyButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, _shellHierarchyButtonRect, "🧭 Dump Shell Hierarchy", _buttonBackgroundColor);
+        DrawButton(canvas, _shellHierarchyButtonRect, "🐚 View Shell Hierarchy", _buttonBackgroundColor);
     }
 
     private void DrawButton(ICanvas canvas, RectF rect, string text, Color backgroundColor)
@@ -250,38 +262,43 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private void DrawCloseButton(ICanvas canvas, RectF contentRect)
     {
-        var closeButtonSize = 32f;
+        var closeButtonSize = 30f;
+        var margin = 10f;
+        // Center the close button vertically within the header area (header height is 50px)
+        var headerHeight = 50f;
+        var buttonY = contentRect.Y + (headerHeight - closeButtonSize) / 2;
+        
         _closeButtonRect = new RectF(
-            contentRect.Right - closeButtonSize, 
-            contentRect.Y, 
-            closeButtonSize, 
+            contentRect.Right - closeButtonSize - margin,
+            buttonY,
+            closeButtonSize,
             closeButtonSize);
 
         canvas.SaveState();
 
         // Close button background
         canvas.FillColor = Color.FromArgb("#FFFF4444");
-        canvas.FillRoundedRectangle(_closeButtonRect, 6);
+        canvas.FillRoundedRectangle(_closeButtonRect, 4);
 
         // Close button border
         canvas.StrokeColor = Color.FromArgb("#FFAA2222");
         canvas.StrokeSize = 1;
-        canvas.DrawRoundedRectangle(_closeButtonRect, 6);
+        canvas.DrawRoundedRectangle(_closeButtonRect, 4);
 
         // Draw X
         canvas.StrokeColor = Colors.White;
         canvas.StrokeSize = 2;
-        var margin = 8f;
+        var xMargin = 8f;
         canvas.DrawLine(
-            _closeButtonRect.X + margin, 
-            _closeButtonRect.Y + margin,
-            _closeButtonRect.Right - margin, 
-            _closeButtonRect.Bottom - margin);
+            _closeButtonRect.X + xMargin,
+            _closeButtonRect.Y + xMargin,
+            _closeButtonRect.Right - xMargin,
+            _closeButtonRect.Bottom - xMargin);
         canvas.DrawLine(
-            _closeButtonRect.Right - margin, 
-            _closeButtonRect.Y + margin,
-            _closeButtonRect.X + margin, 
-            _closeButtonRect.Bottom - margin);
+            _closeButtonRect.Right - xMargin,
+            _closeButtonRect.Y + xMargin,
+            _closeButtonRect.X + xMargin,
+            _closeButtonRect.Bottom - xMargin);
 
         canvas.RestoreState();
     }
@@ -291,7 +308,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _headerRect = new RectF(contentRect.X, contentRect.Y, contentRect.Width, 50);
 
         canvas.SaveState();
-        
+
         // Header background
         canvas.FillColor = Color.FromArgb("#FF2D2D30");
         canvas.FillRoundedRectangle(_headerRect, 4);
@@ -300,32 +317,58 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.FontColor = _textColor;
         canvas.FontSize = 16;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
-        
+
         var headerText = "Visual Tree Explorer";
         canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Export button in top-right corner of header
+        var buttonSize = 30f;
+        var margin = 10f;
+        _exportButtonRect = new RectF(
+            _headerRect.Right - buttonSize - margin,
+            _headerRect.Y + (_headerRect.Height - buttonSize) / 2,
+            buttonSize,
+            buttonSize);
+
+        // Draw export button
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_exportButtonRect, 4);
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_exportButtonRect, 4);
+
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = 14;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
+        canvas.DrawString("💾", _exportButtonRect, HorizontalAlignment.Center, VerticalAlignment.Center);
 
         canvas.RestoreState();
     }
 
     private void DrawBackButton(ICanvas canvas, RectF contentRect)
     {
-        var backButtonSize = 40f;
+        var backButtonSize = 30f;
+        var margin = 10f;
+        // Center the back button vertically within the header area (header height is 50px)
+        var headerHeight = 50f;
+        var buttonY = contentRect.Y + (headerHeight - backButtonSize) / 2;
+        
         _backButtonRect = new RectF(
-            contentRect.X, 
-            contentRect.Y + 5, 
-            backButtonSize, 
+            contentRect.X + margin,
+            buttonY,
+            backButtonSize,
             backButtonSize);
 
         canvas.SaveState();
 
         // Back button background
         canvas.FillColor = Color.FromArgb("#FF4A4A4A");
-        canvas.FillRoundedRectangle(_backButtonRect, 8);
+        canvas.FillRoundedRectangle(_backButtonRect, 4);
 
         // Back button border
         canvas.StrokeColor = Color.FromArgb("#FF666666");
         canvas.StrokeSize = 1;
-        canvas.DrawRoundedRectangle(_backButtonRect, 8);
+        canvas.DrawRoundedRectangle(_backButtonRect, 4);
 
         // Draw back arrow
         canvas.StrokeColor = Colors.White;
@@ -333,10 +376,63 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var centerX = _backButtonRect.Center.X;
         var centerY = _backButtonRect.Center.Y;
         var size = 10f;
-        
+
         // Arrow shape: <
-        canvas.DrawLine(centerX + size/2, centerY - size, centerX - size/2, centerY);
-        canvas.DrawLine(centerX - size/2, centerY, centerX + size/2, centerY + size);
+        canvas.DrawLine(centerX + size / 2, centerY - size, centerX - size / 2, centerY);
+        canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY + size);
+
+        canvas.RestoreState();
+    }
+
+    private void DrawScrollButtons(ICanvas canvas, RectF contentRect)
+    {
+        if (_currentTreeData == null) return;
+
+        var buttonSize = 32f;
+        var margin = 8f;
+        var spacing = 4f;
+
+        // Position scroll buttons vertically stacked, flush left at bottom
+        var startX = contentRect.X + Padding;
+        var startY = contentRect.Bottom - (buttonSize * 2) - spacing - margin;
+
+        _scrollUpButtonRect = new RectF(
+            startX,
+            startY,
+            buttonSize,
+            buttonSize);
+
+        _scrollDownButtonRect = new RectF(
+            startX,
+            startY + buttonSize + spacing,
+            buttonSize,
+            buttonSize);
+
+        canvas.SaveState();
+
+        // Draw scroll up button
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_scrollUpButtonRect, 4);
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_scrollUpButtonRect, 4);
+
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = 18;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 700, FontStyleType.Normal);
+        canvas.DrawString("↑", _scrollUpButtonRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Draw scroll down button
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_scrollDownButtonRect, 4);
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_scrollDownButtonRect, 4);
+
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = 18;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 700, FontStyleType.Normal);
+        canvas.DrawString("↓", _scrollDownButtonRect, HorizontalAlignment.Center, VerticalAlignment.Center);
 
         canvas.RestoreState();
     }
@@ -347,10 +443,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
             return;
 
         canvas.SaveState();
-        
+
         // Define scrollable content area (below header)
         var treeContentRect = new RectF(
-            contentRect.X, 
+            contentRect.X,
             _headerRect.Bottom + Padding,
             contentRect.Width,
             contentRect.Height - _headerRect.Height - Padding);
@@ -362,7 +458,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.ClipRectangle(treeContentRect);
 
         var currentY = treeContentRect.Y - _scrollOffset;
-        
+
         foreach (var rootNode in _currentTreeData)
         {
             currentY = DrawTreeNode(canvas, rootNode, treeContentRect.X, currentY, treeContentRect.Width);
@@ -374,9 +470,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private float DrawTreeNode(ICanvas canvas, TreeNode node, float x, float y, float width)
     {
         var nodeHeight = LineHeight;
-        var indentSize = 30f; // Increased indent for better hierarchy
+        var indentSize = 15f; // Optimized indent for better screen utilization
         var nodeX = x + (node.Depth * indentSize);
-        
+
         // Determine if this is a property line early for use in rendering logic
         var name = node.Name;
         var details = node.Details;
@@ -388,90 +484,49 @@ public class DebugOverlayPanel : IWindowOverlayElement
                              name.StartsWith("V:", StringComparison.OrdinalIgnoreCase) ||
                              name.StartsWith("H:", StringComparison.OrdinalIgnoreCase) ||
                              details.Contains("|"); // Multi-property lines like "400×300 | Position: (0,0) | H: Fill"
-        
+
         // Create larger hit rect for better touch handling
         var expanderSize = 20f;
-        var expanderRect = new RectF(nodeX - expanderSize, y + (nodeHeight - expanderSize) / 2, expanderSize, expanderSize);
+        var expanderX = nodeX + (node.Depth > 0 ? 5f : 0f); // Small offset from node position
+        var expanderRect = new RectF(expanderX, y + (nodeHeight - expanderSize) / 2, expanderSize, expanderSize);
         var nodeRect = new RectF(nodeX, y, width - nodeX, nodeHeight);
-        
-        // Store rect for hit testing (combine expander + text for easier tapping)
-        var hitRect = new RectF(nodeX - expanderSize, y, width - nodeX + expanderSize, nodeHeight);
+
+        // Store rect for hit testing (include expander area)
+        var hitRect = new RectF(nodeX, y, width - nodeX, nodeHeight);
         _treeNodeRects.Add(hitRect);
 
         canvas.SaveState();
 
-        // Draw connecting lines for better tree structure
-        if (node.Depth > 0)
-        {
-            canvas.StrokeColor = Color.FromArgb("#FF666666");
-            canvas.StrokeSize = 1;
-            
-            // Vertical line from parent
-            var lineX = x + ((node.Depth - 1) * indentSize) + indentSize / 2;
-            canvas.DrawLine(lineX, y, lineX, y + nodeHeight / 2);
-            
-            // Horizontal line to current node
-            canvas.DrawLine(lineX, y + nodeHeight / 2, nodeX - 5, y + nodeHeight / 2);
-        }
+        // Skip drawing connecting lines for cleaner look
 
-        // Draw expand/collapse indicator with better visibility
+        // Draw expand/collapse indicator - simplified text-based approach
         if (node.Children.Count > 0)
         {
-            // Background circle with better contrast
-            canvas.FillColor = node.IsExpanded ? Color.FromArgb("#FF2E5F8A") : Color.FromArgb("#FF3F6F3F");  // Blue for expanded, green for collapsed
-            canvas.FillEllipse(expanderRect);
-            
-            // Border for better definition
-            canvas.StrokeColor = Colors.White;
-            canvas.StrokeSize = 2;
-            canvas.DrawEllipse(expanderRect);
-            
-            // Draw expand/collapse symbol with better visibility
             canvas.FontColor = Colors.White;
-            canvas.FontSize = 16;
-            canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 800, FontStyleType.Normal);
-            
+            canvas.FontSize = 14;
+            canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 700, FontStyleType.Normal);
+
             var symbol = node.IsExpanded ? "−" : "+";
             canvas.DrawString(symbol, expanderRect, HorizontalAlignment.Center, VerticalAlignment.Center);
         }
-        else
-        {
-            // For leaf nodes that are properties, use a smaller, different indicator
-            if (isPropertyLine)
-            {
-                // Small property indicator
-                var dotSize = 4f;
-                var dotRect = new RectF(expanderRect.Center.X - dotSize/2, expanderRect.Center.Y - dotSize/2, dotSize, dotSize);
-                canvas.FillColor = Color.FromArgb("#FF999999");
-                canvas.FillEllipse(dotRect);
-            }
-            else
-            {
-                // Regular leaf node (element with no children)
-                var dotSize = 8f;
-                var dotRect = new RectF(expanderRect.Center.X - dotSize/2, expanderRect.Center.Y - dotSize/2, dotSize, dotSize);
-                canvas.FillColor = Color.FromArgb("#FF666666");
-                canvas.FillEllipse(dotRect);
-                canvas.StrokeColor = Color.FromArgb("#FFAAAAAA");
-                canvas.StrokeSize = 1;
-                canvas.DrawEllipse(dotRect);
-            }
-        }
+
+        // Calculate text position accounting for expander
+        var textStartX = node.Children.Count > 0 ? expanderX + expanderSize + 4 : nodeX + 4;
 
         // Draw node text with better formatting (variables already declared at top of method)
         if (isPropertyLine)
         {
-            // Property lines: smaller, dimmed, indented text
+            // Property lines: smaller, dimmed, minimal indentation
             canvas.FontColor = Color.FromArgb("#FFAAAAAA");
             canvas.FontSize = 10;
             canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
-            
+
             var displayText = string.IsNullOrEmpty(details) ? name : $"{name}: {details}";
             if (displayText.Length > 80)
                 displayText = displayText[..77] + "...";
-                
-            // Add extra indentation for property lines to visually distinguish them
-            var propertyIndent = nodeX + 25; 
+
+            // Minimal indentation for property lines - just align with parent element text
+            var propertyIndent = nodeX + 8; // Small offset instead of heavy indentation
             canvas.DrawString(displayText, new RectF(propertyIndent, y, width - propertyIndent - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
         }
         else
@@ -483,17 +538,17 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 canvas.FontColor = Colors.White;
                 canvas.FontSize = 13;
                 canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 700, FontStyleType.Normal);
-                
+
                 // Truncate very long names
                 var displayName = name.Length > 40 ? name[..37] + "..." : name;
-                canvas.DrawString(displayName, new RectF(nodeX + 4, y, width - nodeX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(displayName, new RectF(textStartX, y, width - textStartX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
-            
+
             if (!string.IsNullOrEmpty(details))
             {
                 // Calculate text width of name to position details
                 var nameWidth = !string.IsNullOrEmpty(name) ? Math.Min(name.Length * 8, 300) : 0; // Cap width for layout
-                
+
                 // Draw details in green for MauiReactor, yellow for text content, gray for IDs
                 Color detailColor;
                 if (details.Contains("[MauiReactor]"))
@@ -504,13 +559,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     detailColor = Color.FromArgb("#FFCCCC99"); // Light yellow for IDs
                 else
                     detailColor = Color.FromArgb("#FFCCCCCC"); // Default gray
-                
+
                 canvas.FontColor = detailColor;
                 canvas.FontSize = 11;
                 canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
-                
+
                 var detailsText = details.Length > 50 ? details[..47] + "..." : details;
-                canvas.DrawString(detailsText, new RectF(nodeX + nameWidth + 12, y, width - nodeX - nameWidth - 12, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(detailsText, new RectF(textStartX + nameWidth + 8, y, width - textStartX - nameWidth - 8, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
 
@@ -580,7 +635,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 Debug.WriteLine($"Visual Tree button tap ignored due to debouncing (< {ButtonTapDebounceMs}ms)");
                 return true;
             }
-            
+
             _lastButtonTapTime = currentTime;
             Debug.WriteLine("Visual Tree button tapped - showing tree view");
             _ = Task.Run(async () => await ShowVisualTreeView());
@@ -596,7 +651,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 Debug.WriteLine($"Shell Hierarchy button tap ignored due to debouncing (< {ButtonTapDebounceMs}ms)");
                 return true;
             }
-            
+
             _lastButtonTapTime = currentTime;
             Debug.WriteLine("Shell Hierarchy button tapped - showing tree view");
             _ = Task.Run(async () => await ShowShellHierarchyView());
@@ -614,12 +669,68 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _currentState = PanelState.MainMenu;
             _currentTreeData = null;
             _scrollOffset = 0;
+            _isScrolling = false; // Reset scroll state
             _overlay.Invalidate();
             return true;
         }
 
-        // Handle tapping on tree nodes directly
+        // Check if export button was tapped
+        if (_exportButtonRect.Contains(point))
+        {
+            Debug.WriteLine("=== EXPORT BUTTON TAPPED ===");
+            Debug.WriteLine($"=== EXPORT: Current tree data has {_currentTreeData?.Count ?? 0} root nodes ===");
+            // Export the current tree data to file
+            _ = Task.Run(async () => await ExportCurrentTreeToFile());
+            return true;
+        }
+
+        // Check if scroll buttons were tapped
+        if (_scrollUpButtonRect.Contains(point))
+        {
+            ApplyScroll(-LineHeight * 3); // Scroll up by 3 lines
+            return true;
+        }
+
+        if (_scrollDownButtonRect.Contains(point))
+        {
+            ApplyScroll(LineHeight * 3); // Scroll down by 3 lines
+            return true;
+        }
+
+        // Since WindowOverlay only provides tap events, implement scroll using simple position tracking
+        var currentTime = DateTime.Now;
+        var timeSinceLastTouch = (currentTime - _touchStartTime).TotalMilliseconds;
+
+        // Reset scroll tracking if too much time has passed
+        if (timeSinceLastTouch > 200)
+        {
+            _touchStartPoint = point;
+            _touchStartTime = currentTime;
+            _isScrolling = false;
+        }
+        else if (timeSinceLastTouch > 50) // Quick successive taps might indicate scrolling
+        {
+            var yDiff = point.Y - _touchStartPoint.Y;
+            var distance = Math.Abs(yDiff);
+
+            if (distance > MinScrollDistance)
+            {
+                // Calculate scroll amount - make it more responsive
+                var scrollAmount = (float)(yDiff * ScrollSensitivity);
+
+                Debug.WriteLine($"Scroll detected: yDiff={yDiff}, scrollAmount={scrollAmount}");
+                ApplyScroll(scrollAmount);
+
+                // Reset for next potential scroll
+                _touchStartPoint = point;
+                _touchStartTime = currentTime;
+                return true;
+            }
+        }
+
+        // Handle normal tree node tapping
         HandleTreeNodeTap(point);
+
         return true;
     }
 
@@ -666,21 +777,67 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
     }
 
+    private void ApplyScroll(float scrollDelta)
+    {
+        if (_currentTreeData == null) return;
+
+        var previousOffset = _scrollOffset;
+        _scrollOffset += scrollDelta;
+
+        // Calculate content bounds for scroll limiting
+        var totalContentHeight = CalculateTreeContentHeight();
+        var visibleHeight = GetTreeViewVisibleHeight();
+
+        // Apply bounds checking
+        var maxScrollOffset = Math.Max(0, totalContentHeight - visibleHeight);
+        _scrollOffset = Math.Max(0, Math.Min(maxScrollOffset, _scrollOffset));
+
+        // Only invalidate if scroll position actually changed
+        if (Math.Abs(_scrollOffset - previousOffset) > 0.5f)
+        {
+            _overlay.Invalidate();
+        }
+    }
+
+    private float CalculateTreeContentHeight()
+    {
+        if (_currentTreeData == null) return 0;
+
+        var flattenedNodes = GetFlattenedNodes();
+        return flattenedNodes.Count * LineHeight;
+    }
+
+    private float GetTreeViewVisibleHeight()
+    {
+        // Return the height of the scrollable tree view area
+        // This should match the height used in DrawTreeView
+        var windowHeight = _panelRect.Height;
+        var (safeTop, safeBottom, _, _) = GetSafeAreaInsets(_panelRect);
+        var contentHeight = windowHeight - safeTop - safeBottom - (ContentPadding * 2);
+        var headerHeight = 50f; // Tree view header height
+
+        return contentHeight - headerHeight - Padding;
+    }
+
     public void Show()
     {
+        _overlay.DisableUITouchEventPassthrough = true;
         _isVisible = true;
         _currentState = PanelState.MainMenu; // Reset to main menu when showing
         _currentTreeData = null;
         _scrollOffset = 0;
+        _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
     }
 
     public void Hide()
     {
+        _overlay.DisableUITouchEventPassthrough = false;
         _isVisible = false;
         _currentState = PanelState.MainMenu;
         _currentTreeData = null;
         _scrollOffset = 0;
+        _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
     }
 
@@ -706,7 +863,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             var dump = _dumpService.DumpCurrentPage(options);
             _currentTreeData = ParseVisualTreeDump(dump);
-            
+
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 _currentState = PanelState.TreeView;
@@ -723,26 +880,51 @@ public class DebugOverlayPanel : IWindowOverlayElement
     {
         try
         {
-            var options = new VisualTreeDumpService.DumpOptions
-            {
-                IncludeLayoutProperties = true,
-                IncludeHandlerInfo = true,
-                IncludeMauiReactorInfo = true,
-                MaxDepth = 10
-            };
+            Debug.WriteLine("=== SHELL HIERARCHY: Starting dump process ===");
 
-            var dump = _dumpService.DumpShellHierarchy(options);
-            _currentTreeData = ParseVisualTreeDump(dump);
-            
-            MainThread.BeginInvokeOnMainThread(() =>
+            // Shell hierarchy dump must run on main thread to access UIKit components
+            await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                _currentState = PanelState.TreeView;
-                _overlay.Invalidate();
+                try
+                {
+                    var options = new VisualTreeDumpService.DumpOptions
+                    {
+                        IncludeLayoutProperties = true,
+                        IncludeHandlerInfo = true,
+                        IncludeMauiReactorInfo = true,
+                        MaxDepth = 10
+                    };
+
+                    Debug.WriteLine("=== SHELL HIERARCHY: Calling DumpShellHierarchy on main thread ===");
+                    var dump = _dumpService.DumpShellHierarchy(options);
+
+                    Debug.WriteLine($"=== SHELL HIERARCHY: Dump result length: {dump?.Length ?? 0} characters ===");
+                    if (!string.IsNullOrEmpty(dump))
+                    {
+                        Debug.WriteLine($"=== SHELL HIERARCHY: First 200 chars: {dump.Substring(0, Math.Min(200, dump.Length))} ===");
+                    }
+
+                    Debug.WriteLine("=== SHELL HIERARCHY: Parsing dump data ===");
+                    _currentTreeData = ParseVisualTreeDump(dump ?? string.Empty);
+
+                    Debug.WriteLine($"=== SHELL HIERARCHY: Parsed {_currentTreeData?.Count ?? 0} root nodes ===");
+
+                    Debug.WriteLine("=== SHELL HIERARCHY: Navigating to TreeView state ===");
+                    _currentState = PanelState.TreeView;
+                    _overlay.Invalidate();
+                    Debug.WriteLine("=== SHELL HIERARCHY: Navigation complete ===");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"=== SHELL HIERARCHY ERROR (Main Thread): {ex.Message} ===");
+                    Debug.WriteLine($"=== SHELL HIERARCHY STACK TRACE (Main Thread): {ex.StackTrace} ===");
+                }
             });
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error showing shell hierarchy view: {ex.Message}");
+            Debug.WriteLine($"=== SHELL HIERARCHY ERROR (Async): {ex.Message} ===");
+            Debug.WriteLine($"=== SHELL HIERARCHY STACK TRACE (Async): {ex.StackTrace} ===");
         }
     }
 
@@ -751,21 +933,21 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var lines = dump.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var rootNodes = new List<TreeNode>();
         var nodeStack = new Stack<TreeNode>();
-        
+
         foreach (var line in lines)
         {
             // Skip header lines and empty lines
-            if (line.StartsWith("===") || line.StartsWith("Timestamp:") || 
+            if (line.StartsWith("===") || line.StartsWith("Timestamp:") ||
                 line.StartsWith("Current Page:") || line.StartsWith("Main Page:") ||
                 line.StartsWith("Navigation Context:") || string.IsNullOrWhiteSpace(line))
                 continue;
 
             var depth = GetLineDepth(line);
             var cleanLine = line.Trim();
-            
+
             // Extract element name and details
             var (name, details) = ExtractNodeInfo(cleanLine);
-            
+
             var node = new TreeNode
             {
                 Name = name,
@@ -774,7 +956,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 FullText = cleanLine,
                 IsExpanded = false // Start collapsed by default
             };
-            
+
             // Debug logging to understand the parsing
             Debug.WriteLine($"Parsed node - Depth: {depth}, Name: '{name}', Details: '{details}', Line: '{cleanLine.Substring(0, Math.Min(50, cleanLine.Length))}...'");
 
@@ -807,10 +989,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             spaces++;
         }
-        
+
         // Each level of depth uses IndentSize (2) spaces
         var depth = spaces / 2;
-        
+
         Debug.WriteLine($"Line depth analysis: '{line.Substring(0, Math.Min(30, line.Length))}...' -> Depth: {depth} (spaces: {spaces})");
         return depth;
     }
@@ -819,10 +1001,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
     {
         // Remove leading whitespace and tree structure characters
         var cleaned = line.TrimStart();
-        
+
         // Remove tree structure characters (├─ prefix used by VisualTreeDumpService)
         cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"^├─\s*", "");
-        
+
         // Check if this is a property line (indented further, no ├─ prefix in original)
         var isPropertyLine = line.TrimStart().StartsWith("Size:") ||
                             line.TrimStart().StartsWith("Position:") ||
@@ -830,7 +1012,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                             line.TrimStart().StartsWith("PlatformView:") ||
                             line.TrimStart().StartsWith("PlatformBounds:") ||
                             (line.Contains("|") && (line.Contains("Size:") || line.Contains("Position:") || line.Contains("H:") || line.Contains("V:")));
-        
+
         if (isPropertyLine)
         {
             // Property lines: "Size: 400×300 | Position: (0,0) | H: Fill"
@@ -843,9 +1025,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
             }
             return (cleaned, "");
         }
-        
+
         // Element lines: "ElementName [MauiReactor]" or "ElementName \"Text Content\""
-        
+
         // Handle MauiReactor annotation: "ElementName [MauiReactor]"
         if (cleaned.Contains('[') && cleaned.Contains(']'))
         {
@@ -854,7 +1036,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             var details = cleaned[bracketStart..].Trim();
             return (string.IsNullOrEmpty(name) ? details : name, string.IsNullOrEmpty(name) ? "" : details);
         }
-        
+
         // Handle quoted text content: 'ElementName "Text Content"'
         if (cleaned.Contains('"'))
         {
@@ -863,7 +1045,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             var details = cleaned[quoteStart..].Trim();
             return (string.IsNullOrEmpty(name) ? details : name, string.IsNullOrEmpty(name) ? "" : details);
         }
-        
+
         // Handle ID annotations: "ElementName (Id: someId)"
         if (cleaned.Contains('(') && cleaned.Contains(')'))
         {
@@ -872,9 +1054,70 @@ public class DebugOverlayPanel : IWindowOverlayElement
             var details = cleaned[parenStart..].Trim();
             return (string.IsNullOrEmpty(name) ? details : name, string.IsNullOrEmpty(name) ? "" : details);
         }
-        
+
         // Simple element name
         return (cleaned.Trim(), "");
+    }
+
+    private async Task ExportCurrentTreeToFile()
+    {
+        if (_currentTreeData == null)
+        {
+            Debug.WriteLine("=== EXPORT ERROR: No tree data available to export ===");
+            return;
+        }
+
+        try
+        {
+            Debug.WriteLine("=== EXPORT: Starting export process ===");
+            Debug.WriteLine($"=== EXPORT: Converting {_currentTreeData.Count} root nodes to export format ===");
+
+            // Convert tree data back to readable format for export
+            var exportContent = ConvertTreeToExportFormat(_currentTreeData);
+
+            Debug.WriteLine($"=== EXPORT: Generated export content ({exportContent.Length} characters) ===");
+
+            await WriteToDebugFile(exportContent, "visual-tree-export");
+
+            Debug.WriteLine("=== EXPORT: Visual tree exported to file successfully ===");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"=== EXPORT ERROR: {ex.Message} ===");
+            Debug.WriteLine($"=== EXPORT STACK TRACE: {ex.StackTrace} ===");
+        }
+    }
+
+    private string ConvertTreeToExportFormat(List<TreeNode> treeData)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("=== Visual Tree Export ===");
+        sb.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine();
+
+        foreach (var rootNode in treeData)
+        {
+            ConvertNodeToExportFormat(rootNode, sb, "");
+        }
+
+        return sb.ToString();
+    }
+
+    private void ConvertNodeToExportFormat(TreeNode node, System.Text.StringBuilder sb, string indent)
+    {
+        // Format similar to original dump format
+        var nodeText = string.IsNullOrEmpty(node.Details)
+            ? node.Name
+            : $"{node.Name} {node.Details}";
+
+        sb.AppendLine($"{indent}├─ {nodeText}");
+
+        // Add children with increased indentation
+        var childIndent = indent + "  ";
+        foreach (var child in node.Children)
+        {
+            ConvertNodeToExportFormat(child, sb, childIndent);
+        }
     }
 
     // Legacy methods - keeping for backward compatibility but functionality moved to ShowVisualTreeView/ShowShellHierarchyView
@@ -895,24 +1138,29 @@ public class DebugOverlayPanel : IWindowOverlayElement
             // Get a suitable directory for debug files
             var debugDir = System.IO.Path.Combine(FileSystem.Current.AppDataDirectory, "debug-dumps");
             System.IO.Directory.CreateDirectory(debugDir);
-            
+
             // Create filename with timestamp
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             var filename = $"{type}-dump_{timestamp}.txt";
             var filePath = System.IO.Path.Combine(debugDir, filename);
-            
+
             // Write content to file
             await System.IO.File.WriteAllTextAsync(filePath, content);
-            
+
             // Also create a "latest" file for easy access
             var latestPath = System.IO.Path.Combine(debugDir, $"{type}-dump_latest.txt");
             await System.IO.File.WriteAllTextAsync(latestPath, content);
-            
-            Debug.WriteLine($"Debug dump saved to: {filePath}");
+
+            Debug.WriteLine("==========================================");
+            Debug.WriteLine($"=== FILE SAVED SUCCESSFULLY ===");
+            Debug.WriteLine($"=== FILE PATH: {filePath} ===");
+            Debug.WriteLine($"=== LATEST FILE: {latestPath} ===");
+            Debug.WriteLine($"=== FILE SIZE: {content.Length} characters ===");
+            Debug.WriteLine("==========================================");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Failed to write debug file: {ex.Message}");
+            Debug.WriteLine($"=== ERROR: Failed to write debug file: {ex.Message} ===");
         }
     }
 }
