@@ -1,4 +1,3 @@
-﻿
 using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Maui.Graphics;
@@ -8,48 +7,107 @@ namespace Plugin.Maui.DebugOverlay;
 public class DebugOverlay : WindowOverlay
 {
     private DebugRibbonElement _debugRibbonElement;
+    private DebugOverlayPanel _debugPanel;
 
     private Color _ribbonColor;
-    private string _mauiVersion;
+    private bool _isPanelVisible;
+    private DateTime _lastTapTime = DateTime.MinValue;
+    private const int TapDebounceMs = 300; // 300ms debounce
     
-    public DebugOverlay(IWindow window, Color ribbonColor = null ) : base(window)
+    public DebugOverlay(IWindow window, Color ribbonColor = null) : base(window)
     {
-        _ribbonColor = ribbonColor;
-        _debugRibbonElement = new DebugRibbonElement(this, ribbonColor: ribbonColor);
+        _ribbonColor = ribbonColor ?? Colors.MediumPurple;
+        
+        // Create ribbon element (always shows "DEBUG")
+        _debugRibbonElement = new DebugRibbonElement(this, labelText: "DEBUG", ribbonColor: _ribbonColor);
         this.AddWindowElement(_debugRibbonElement);
-        Debug.WriteLine("DebugOverlay created AND element added");
+        
+        // Create panel element (initially hidden)
+        _debugPanel = new DebugOverlayPanel(this, panelBackgroundColor: Color.FromArgb("#E0000000"));
+        this.AddWindowElement(_debugPanel);
+        
+        _isPanelVisible = false;
+        
+        Debug.WriteLine("DebugOverlay created with ribbon and panel elements");
         this.Tapped += DebugOverlay_Tapped;
-
-        var version = typeof(MauiApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        _mauiVersion = $"{version?[..version.IndexOf('+')]}";
     }
 
     private void DebugOverlay_Tapped(object? sender, WindowOverlayTappedEventArgs e)
     {
-        Debug.WriteLine("Tapped");
-        if (_debugRibbonElement.Contains(e.Point))
+        var currentTime = DateTime.Now;
+        var timeSinceLastTap = (currentTime - _lastTapTime).TotalMilliseconds;
+        
+        Debug.WriteLine($"Overlay tapped at point: {e.Point.X}, {e.Point.Y} (time since last tap: {timeSinceLastTap}ms)");
+        
+        // Debounce rapid taps to prevent double-tap issues
+        if (timeSinceLastTap < TapDebounceMs)
         {
-            bool debugMode = _debugRibbonElement.LabelText.Contains("DEBUG");
-            // The tap is on the _debugRibbonElement
-            Debug.WriteLine($"Tapped on _debugRibbonElement {debugMode}");
-            this.RemoveWindowElement(_debugRibbonElement);
-            _debugRibbonElement = new DebugRibbonElement(this, 
-                labelText: (debugMode) ? _mauiVersion : "DEBUG",
-                ribbonColor:_ribbonColor);
-            this.AddWindowElement(_debugRibbonElement);
+            Debug.WriteLine($"Tap ignored due to debouncing (< {TapDebounceMs}ms)");
+            return;
         }
-        else
+        
+        _lastTapTime = currentTime;
+        
+        try
         {
-            // The tap is not on the _debugRibbonElement
-            Debug.WriteLine("Tapped outside of _debugRibbonElement");
-        }
+            // If panel is visible, consume ALL taps to prevent pass-through
+            if (_isPanelVisible)
+            {
+                Debug.WriteLine("Panel is visible - consuming tap to prevent pass-through");
+                _debugPanel.HandleTap(e.Point);
+                return; // Always return early when panel is visible
+            }
 
+            // Panel is not visible - check if ribbon was tapped
+            if (_debugRibbonElement.Contains(e.Point))
+            {
+                Debug.WriteLine($"=== RIBBON TAPPED: _isPanelVisible = {_isPanelVisible}, showing panel ===");
+                TogglePanel();
+                return;
+            }
+            
+            // Panel not visible and ribbon not tapped - let tap pass through
+            Debug.WriteLine("No overlay interaction - allowing tap to pass through");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error handling tap: {ex.Message}");
+        }
+    }
+
+    public void ShowPanel()
+    {
+        if (!_isPanelVisible)
+        {
+            _isPanelVisible = true;
+            _debugPanel.Show();
+            Debug.WriteLine("Debug panel shown");
+        }
+    }
+
+    public void HidePanel()
+    {
+        if (_isPanelVisible)
+        {
+            _isPanelVisible = false;
+            _debugPanel.Hide();
+            Debug.WriteLine("=== DEBUG OVERLAY: Panel hidden, _isPanelVisible = false ===");
+        }
+    }
+
+    public void TogglePanel()
+    {
+        if (_isPanelVisible)
+            HidePanel();
+        else
+            ShowPanel();
     }
 
     public override void HandleUIChange()
     {
         base.HandleUIChange();
+        
+        // Invalidate to force redraw of all elements
+        this.Invalidate();
     }
-
-
 }
