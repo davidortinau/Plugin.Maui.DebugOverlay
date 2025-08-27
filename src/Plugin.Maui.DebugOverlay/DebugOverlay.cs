@@ -61,7 +61,7 @@ public class DebugOverlay : WindowOverlay
             // Panel is not visible - check if ribbon was tapped
             if (_debugRibbonElement.Contains(e.Point))
             {
-                Debug.WriteLine("Ribbon tapped - showing panel");
+                Debug.WriteLine($"=== RIBBON TAPPED: _isPanelVisible = {_isPanelVisible}, showing panel ===");
                 TogglePanel();
                 return;
             }
@@ -91,7 +91,7 @@ public class DebugOverlay : WindowOverlay
         {
             _isPanelVisible = false;
             _debugPanel.Hide();
-            Debug.WriteLine("Debug panel hidden");
+            Debug.WriteLine("=== DEBUG OVERLAY: Panel hidden, _isPanelVisible = false ===");
         }
     }
 

@@ -20,7 +20,7 @@ public class TreeNode
 /// </summary>
 public class DebugOverlayPanel : IWindowOverlayElement
 {
-    private readonly WindowOverlay _overlay;
+    private readonly DebugOverlay _overlay;
     private readonly VisualTreeDumpService _dumpService;
     private readonly Color _panelBackgroundColor;
     private readonly Color _buttonBackgroundColor;
@@ -70,7 +70,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(WindowOverlay overlay, Color panelBackgroundColor = null)
+    public DebugOverlayPanel(DebugOverlay overlay, Color panelBackgroundColor = null)
     {
 
         _overlay = overlay;
@@ -622,7 +622,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Check if close button was tapped
         if (_closeButtonRect.Contains(point))
         {
-            Hide();
+            Debug.WriteLine("=== CLOSE BUTTON TAPPED: Calling parent overlay HidePanel() ===");
+            // Notify parent overlay to hide panel properly
+            _overlay.HidePanel();
             return true;
         }
 
