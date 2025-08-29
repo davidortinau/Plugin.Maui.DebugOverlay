@@ -31,9 +31,77 @@ public class DebugRibbonElement : IWindowOverlayElement
     
     private void UpdateBackgroundRect(RectF windowRect)
     {
+        // Get bottom safe area inset to account for Android navigation bar
+        var bottomInset = GetBottomSafeAreaInset();
+        
         // Calculate the hit detection area for the ribbon (same logic as in Draw)
-        _backgroundRect = new RectF(windowRect.Right - 100, windowRect.Bottom - 80, 100, 80);
+        _backgroundRect = new RectF(windowRect.Right - 100, windowRect.Bottom - 80 - bottomInset, 100, 80);
     }
+    
+    private float GetBottomSafeAreaInset()
+    {
+        float bottom = 0f; // Default to no inset
+        
+#if ANDROID
+        try
+        {
+            // Detect Android navigation bar height
+            var context = Platform.CurrentActivity ?? Android.App.Application.Context;
+            if (context?.Resources != null)
+            {
+                // Check if navigation bar is present
+                var resourceId = context.Resources.GetIdentifier("navigation_bar_height", "dimen", "android");
+                if (resourceId > 0)
+                {
+                    var navigationBarHeight = context.Resources.GetDimensionPixelSize(resourceId);
+                    bottom = navigationBarHeight / context.Resources.DisplayMetrics.Density;
+                    
+                    // Additional check to see if navigation bar is actually shown
+                    // This helps distinguish between devices with and without visible navigation buttons
+                    var hasNavigationBar = HasNavigationBar(context);
+                    if (!hasNavigationBar)
+                    {
+                        bottom = 0f;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to default (no inset)
+        }
+#endif
+        
+        return bottom;
+    }
+    
+#if ANDROID
+    private bool HasNavigationBar(Android.Content.Context context)
+    {
+        try
+        {
+            // Check if device has navigation bar by looking at configuration
+            var resources = context.Resources;
+            var id = resources.GetIdentifier("config_showNavigationBar", "bool", "android");
+            if (id > 0)
+            {
+                return resources.GetBoolean(id);
+            }
+            
+            // Fallback: check if navigation bar height > 0 and display has software keys
+            var hasMenuKey = Android.Views.ViewConfiguration.Get(context).HasPermanentMenuKey;
+            var hasBackKey = Android.Views.KeyCharacterMap.DeviceHasKey(Android.Views.Keycode.Back);
+            var hasHomeKey = Android.Views.KeyCharacterMap.DeviceHasKey(Android.Views.Keycode.Home);
+            
+            return !hasMenuKey && !hasBackKey && !hasHomeKey;
+        }
+        catch
+        {
+            // If we can't determine, assume navigation bar exists for safety
+            return true;
+        }
+    }
+#endif
     
     public bool Contains(Point point) 
     {
@@ -52,9 +120,12 @@ public class DebugRibbonElement : IWindowOverlayElement
             const float ribbonWidth = 130;
             const float ribbonHeight = 25;
             
+            // Get bottom safe area inset to account for Android navigation bar
+            var bottomInset = GetBottomSafeAreaInset();
+            
             // Calculate the position of the ribbon in the lower right corner
             float ribbonX = dirtyRect.Right - (ribbonWidth * 0.25f);
-            float ribbonY = dirtyRect.Bottom - (ribbonHeight + (ribbonHeight * 0.05f));
+            float ribbonY = dirtyRect.Bottom - (ribbonHeight + (ribbonHeight * 0.05f)) - bottomInset;
 
             // Update the background rect for hit testing (larger area for easier tapping)
             UpdateBackgroundRect(dirtyRect);
