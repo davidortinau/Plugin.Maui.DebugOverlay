@@ -7,7 +7,7 @@ Always reference these instructions first and fallback to search or bash command
 ## Working Effectively
 
 ### Repository Setup and Requirements
-- Install .NET 8.0 or later SDK
+- Install .NET 9.0 or later SDK
 - Install .NET MAUI workload: `dotnet workload install maui`
 - CRITICAL: Repository currently targets .NET 10 (not yet released) causing build issues
 - Repository has missing MauiVersion property definition in build configuration
@@ -15,17 +15,18 @@ Always reference these instructions first and fallback to search or bash command
 ### Build Process - CURRENT LIMITATIONS
 - **BROKEN BUILD**: The repository currently cannot be built due to configuration issues:
   - Main library targets `net10.0-android;net10.0-ios;net10.0-maccatalyst;net10.0` which are not available
-  - Sample app targets `net8.0-android;net8.0-ios;net8.0-maccatalyst` which require MAUI workload
+  - Sample app targets `net9.0-android;net9.0-ios;net9.0-maccatalyst` which require MAUI workload
   - Missing `$(MauiVersion)` property definition causes package reference failures
-- **Required Fix**: Update library target frameworks to `net8.0-*` to match sample and stable SDK
-- **MauiVersion Property**: Add to Directory.Build.props or define in project files (e.g., `<MauiVersion>8.0.91</MauiVersion>`)
+- **Required Fix**: Update library target frameworks to `net9.0-*` to match sample and stable SDK
+- **MauiVersion Property**: Add to Directory.Build.props or define in project files (e.g., `<MauiVersion>9.0.0</MauiVersion>`)
 - DO NOT attempt to build until these configuration issues are resolved
 - Expected build command when working: `dotnet build src/Plugin.Maui.DebugOverlay.sln -c Debug`
 - NEVER CANCEL: MAUI builds typically take 5-15 minutes. Set timeout to 30+ minutes.
+- **CI/CD Note**: You should be able to build from Linux for net9.0-android in CI. Other platforms may not work in CI environment.
 
 ### Temporary Build Workaround (If Needed)
 If you need to test compilation of individual files:
-1. Create temporary test project with net8.0 target
+1. Create temporary test project with net9.0 target
 2. Copy plugin source files to test project  
 3. Add MAUI package references manually
 4. Test compilation and basic functionality
@@ -143,6 +144,7 @@ dotnet pack src/Plugin.Maui.DebugOverlay.sln -c Debug
 - **Sample Workflow**: `.github/workflows/ci-sample.yml` builds sample app
 - **Release Process**: `.github/workflows/release-nuget.yml` publishes to NuGet on version tags
 - All workflows use `dotnet build` with Debug/Release configurations
+- **Linux CI**: You should be able to build from Linux for net9.0-android in CI. Other platforms may not work in CI environment.
 
 ### File Locations Reference
 
@@ -206,7 +208,7 @@ Test that dumps include these critical elements:
 - **MauiReactor Detection**: Special handling for MauiReactor component libraries
 
 ### Expected Repository State Issues
-- **Build Configuration**: Repository targets unreleased .NET 10, needs updating to stable versions
+- **Build Configuration**: Repository targets unreleased .NET 10, needs updating to stable .NET 9 versions
 - **Missing Dependencies**: MauiVersion property undefined causing package reference failures  
 - **Workload Requirements**: MAUI workload installation required but may not be available in all environments
 
@@ -230,6 +232,6 @@ The sample app demonstrates minimal integration:
 - Uses Shell navigation with single ContentPage
 - Adds debug overlay with red color: `Color.FromArgb("#FF3300")`
 - No additional UI elements - focuses on plugin functionality
-- Supports all major platforms: Android, iOS, Windows, macOS, Tizen
+- Supports all major platforms: Android, iOS, Windows, macOS
 
 Always document actual timings and failures when testing commands, and include "NEVER CANCEL" warnings for any operations that may take more than 2 minutes.
