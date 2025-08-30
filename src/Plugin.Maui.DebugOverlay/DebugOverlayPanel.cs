@@ -244,10 +244,58 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _shellHierarchyButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
         DrawButton(canvas, _shellHierarchyButtonRect, "🐚 View Shell Hierarchy", _buttonBackgroundColor);
 
-        // FPS
-        buttonY += ButtonHeight + ButtonSpacing;
-        var fpsButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, fpsButtonRect, $"🐚 Fps: {_emaFps:F1}", _buttonBackgroundColor);
+        var buttonRect = RectF.Zero;
+        if (_debugRibbonOptions.ShowFrame)
+        {
+            // FPS
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}   ⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor);
+
+            //Hitch
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms  💥 Highest: {_emaHighestHitch:F0} ms", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowAlloc_GC)
+        {
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor);
+
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowMemory)
+        {
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowCPU_Usage)
+        {
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+            DrawButton(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowBatteryUsage)
+        {
+            buttonY += ButtonHeight + ButtonSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+
+            var textToShow = $"🔋 Battery consumption: ";
+            if (_batteryMilliWAvailable)
+                textToShow += $"{_batteryMilliW:F1} mW";
+            else
+                textToShow += "N/A";
+
+            DrawButton(canvas, buttonRect, textToShow, _buttonBackgroundColor);
+        }
     }
 
     private void DrawButton(ICanvas canvas, RectF rect, string text, Color backgroundColor)
@@ -1189,7 +1237,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
     #region Performances
 
     #region variables
-     
+
     private readonly FpsService _fpsService;
 
     private double _overallScore;
@@ -1299,7 +1347,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private void invalidateOverlayToForceRedraw()
     {
-        _overlay.Invalidate(); 
+        _overlay.Invalidate();
     }
 
     private void stopMonitoringPerformances()
