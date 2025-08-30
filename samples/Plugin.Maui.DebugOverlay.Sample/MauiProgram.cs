@@ -10,7 +10,15 @@ public static class MauiProgram
 		var builder = MauiApp.CreateBuilder();
 		builder
 			.UseMauiApp<App>()
-			.UseDebugRibbon(Color.FromArgb("#FF3300"))
+			.UseDebugRibbon(options =>
+			{
+                options.SetRibbonColor(Color.FromArgb("#FF3300"))
+					.EnableBatteryUsage()
+					.EnableGC()
+					.EnableCPU()
+					.EnableMemory(true)
+					.EnableFrame();
+            })
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

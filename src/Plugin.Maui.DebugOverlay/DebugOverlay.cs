@@ -4,26 +4,24 @@ using System.Diagnostics;
 namespace Plugin.Maui.DebugOverlay;
 
 public class DebugOverlay : WindowOverlay
-{
+{ 
     private DebugRibbonElement _debugRibbonElement;
     private DebugOverlayPanel _debugPanel;
 
-    private Color _ribbonColor;
     private bool _isPanelVisible;
     private DateTime _lastTapTime = DateTime.MinValue;
     private const int TapDebounceMs = 300; // 300ms debounce
     private float _topInset;
 
-    public DebugOverlay(IWindow window, Color ribbonColor = null) : base(window)
-    {
-        _ribbonColor = ribbonColor ?? Colors.MediumPurple;
+    public DebugOverlay(IWindow window, DebugRibbonOptions debugRibbonOptions) : base(window)
+    { 
 
         // Create ribbon element (always shows "DEBUG")
-        _debugRibbonElement = new DebugRibbonElement(this, labelText: "DEBUG", ribbonColor: _ribbonColor);
+        _debugRibbonElement = new DebugRibbonElement(this, labelText: "DEBUG", ribbonColor: debugRibbonOptions.RibbonColor);
         this.AddWindowElement(_debugRibbonElement);
 
         // Create panel element (initially hidden)
-        _debugPanel = new DebugOverlayPanel(this, panelBackgroundColor: Color.FromArgb("#E0000000"));
+        _debugPanel = new DebugOverlayPanel(this, debugRibbonOptions, panelBackgroundColor: Color.FromArgb("#E0000000"));
         this.AddWindowElement(_debugPanel);
 
         _isPanelVisible = false;

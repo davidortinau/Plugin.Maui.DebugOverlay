@@ -1,6 +1,6 @@
+using Plugin.Maui.DebugOverlay.Platforms;
 using System.Diagnostics;
 using System.Reflection;
-using Microsoft.Maui.Graphics;
 
 namespace Plugin.Maui.DebugOverlay;
 
@@ -20,6 +20,7 @@ public class TreeNode
 /// </summary>
 public class DebugOverlayPanel : IWindowOverlayElement
 {
+    protected DebugRibbonOptions _debugRibbonOptions;
     private readonly DebugOverlay _overlay;
     private readonly VisualTreeDumpService _dumpService;
     private readonly Color _panelBackgroundColor;
@@ -70,9 +71,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(DebugOverlay overlay, Color panelBackgroundColor = null)
+    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color panelBackgroundColor = null)
     {
-
+        _debugRibbonOptions = debugRibbonOptions;
         _overlay = overlay;
 
         _dumpService = new VisualTreeDumpService();
@@ -84,6 +85,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Get MAUI version
         var version = typeof(MauiApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         _mauiVersion = version != null && version.Contains('+') ? version[..version.IndexOf('+')] : version ?? "Unknown";
+
+        // Performances
+        _stopwatch = new Stopwatch();
+
+        _fpsService = new FpsService();
+        _fpsService.OnFrameTimeCalculated += _fpsService_OnFrameTimeCalculated;
     }
 
     public bool Contains(Point point)
@@ -236,6 +243,11 @@ public class DebugOverlayPanel : IWindowOverlayElement
         buttonY += ButtonHeight + ButtonSpacing;
         _shellHierarchyButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
         DrawButton(canvas, _shellHierarchyButtonRect, "🐚 View Shell Hierarchy", _buttonBackgroundColor);
+
+        // FPS
+        buttonY += ButtonHeight + ButtonSpacing;
+        var fpsButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+        DrawButton(canvas, fpsButtonRect, $"🐚 Fps: {_emaFps:F1}", _buttonBackgroundColor);
     }
 
     private void DrawButton(ICanvas canvas, RectF rect, string text, Color backgroundColor)
@@ -267,7 +279,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Center the close button vertically within the header area (header height is 50px)
         var headerHeight = 50f;
         var buttonY = contentRect.Y + (headerHeight - closeButtonSize) / 2;
-        
+
         _closeButtonRect = new RectF(
             contentRect.Right - closeButtonSize - margin,
             buttonY,
@@ -352,7 +364,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Center the back button vertically within the header area (header height is 50px)
         var headerHeight = 50f;
         var buttonY = contentRect.Y + (headerHeight - backButtonSize) / 2;
-        
+
         _backButtonRect = new RectF(
             contentRect.X + margin,
             buttonY,
@@ -830,6 +842,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _scrollOffset = 0;
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
+
+        startMonitoringPerformances();
     }
 
     public void Hide()
@@ -841,6 +855,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _scrollOffset = 0;
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
+
+        stopMonitoringPerformances();
     }
 
     public void Toggle()
@@ -1165,4 +1181,273 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Debug.WriteLine($"=== ERROR: Failed to write debug file: {ex.Message} ===");
         }
     }
+
+
+
+
+
+    #region Performances
+
+    #region variables
+     
+    private readonly FpsService _fpsService;
+
+    private double _overallScore;
+    private double _cpuUsage;
+    private TimeSpan _prevCpuTime;
+    private double _memoryUsage;
+    private int _threadCount;
+    private int _processorCount = Environment.ProcessorCount;
+
+
+    private volatile bool _stopRequested = false;
+    private Stopwatch _stopwatch;
+
+
+    //FPS >EMA (Exponential Moving Average)
+    private double _emaFrameTime = 0;
+    private double _emaFps = 0;
+    private const double _emaAlpha = 0.9;
+
+
+    //hitch
+    private const double HitchThresholdMs = 200;
+    private double _emaHitch = 0;
+    private double _emaHighestHitch = 0;
+    private const double _emaHitchAlpha = 0.7; // more reactive than FPS/FrameTime
+
+
+    //GC
+    private int _gc0Prev = 0;
+    private int _gc1Prev = 0;
+    private int _gc2Prev = 0;
+
+    private int _gc0Delta = 0;
+    private int _gc1Delta = 0;
+    private int _gc2Delta = 0;
+
+
+    //Alloc/sec
+    private long _lastTotalMemory = 0;
+    private double _allocPerSec = 0;
+
+    private readonly Process _currentProcess = Process.GetCurrentProcess();
+    private long _lastAllocatedBytes = GC.GetTotalAllocatedBytes(false);
+
+    //Networking
+    long totalRequests = 0;
+    long totalSent = 0;
+    long totalReceived = 0;
+
+    //double totalRequestsPerSecond = 0;
+    //double totalSentPerSecond = 0;
+    //double totalReceivedPerSecond = 0;
+
+    double avgRequestTime = 0;
+
+    //overall score
+    private double _emaOverallScore = 0;
+    private const double _emaOverallAlpha = 0.6; // 0–1, bigger = more reactiv
+
+    private double _batteryMilliW = 0;
+    private bool _batteryMilliWAvailable = true;
+    #endregion
+
+    #region methods
+    private void startMonitoringPerformances()
+    {
+        _stopRequested = false;
+        _fpsService?.Start();
+        startMetrics();
+    }
+
+    private void startMetrics()
+    {
+        _stopwatch.Restart();
+        _prevCpuTime = _currentProcess.TotalProcessorTime;
+
+        Microsoft.Maui.Controls.Application.Current!.Dispatcher.StartTimer(TimeSpan.FromSeconds(1), () =>
+        {
+            if (_debugRibbonOptions.ShowAlloc_GC)
+                updateGcAndAllocMetrics();
+
+            updateExtraMetrics();
+
+            if (_debugRibbonOptions.ShowCPU_Usage)
+            {
+                _memoryUsage = _currentProcess.WorkingSet64 / (1024 * 1024);
+                _threadCount = _currentProcess.Threads.Count;
+
+                var currentCpuTime = _currentProcess.TotalProcessorTime;
+                double cpuDelta = (currentCpuTime - _prevCpuTime).TotalMilliseconds;
+
+                double interval = _stopwatch.Elapsed.TotalMilliseconds; // ⬅️ real interval
+                _cpuUsage = (cpuDelta / interval) * 100 / _processorCount;
+
+                _prevCpuTime = currentCpuTime;
+            }
+            _stopwatch.Restart();
+
+            _overallScore = calculateOverallScore();
+            updateOverallScore(_overallScore);
+
+            MainThread.BeginInvokeOnMainThread(invalidateOverlayToForceRedraw);
+
+            return !_stopRequested;
+        });
+    }
+
+    private void invalidateOverlayToForceRedraw()
+    {
+        _overlay.Invalidate(); 
+    }
+
+    private void stopMonitoringPerformances()
+    {
+        _fpsService?.Stop();
+        _stopRequested = true;
+    }
+
+    private void _fpsService_OnFrameTimeCalculated(double frameTimeMs)
+    {
+        const double MinFrameTime = 0.1; // ms, pentru a evita diviziunea la zero
+        frameTimeMs = Math.Max(frameTimeMs, MinFrameTime);
+
+        // EMA FrameTime
+        if (_emaFrameTime == 0)
+            _emaFrameTime = frameTimeMs;
+        else
+            _emaFrameTime = (_emaAlpha * _emaFrameTime) + ((1 - _emaAlpha) * frameTimeMs);
+
+        // EMA FPS
+        double fps = 1000.0 / frameTimeMs;
+        if (_emaFps == 0)
+            _emaFps = fps;
+        else
+            _emaFps = (_emaAlpha * _emaFps) + ((1 - _emaAlpha) * fps);
+
+        // Hitch EMA
+        double hitchValue = frameTimeMs >= HitchThresholdMs ? frameTimeMs : 0;
+        if (_emaHitch == 0)
+            _emaHitch = hitchValue;
+        else
+            _emaHitch = (_emaHitchAlpha * _emaHitch) + ((1 - _emaHitchAlpha) * hitchValue);
+
+        if (_emaHitch > _emaHighestHitch)
+            _emaHighestHitch = _emaHitch;
+    }
+
+
+
+
+    private void updateGcAndAllocMetrics()
+    {
+        double elapsedSec = _stopwatch.Elapsed.TotalSeconds;
+        if (elapsedSec <= 0) elapsedSec = 1; // fallback
+
+        // Alloc/sec
+        long currentAllocated = GC.GetTotalAllocatedBytes(false);
+        long deltaAllocated = currentAllocated - _lastAllocatedBytes;
+        _allocPerSec = (deltaAllocated / (1024.0 * 1024.0)) / elapsedSec; // MB/sec
+        _lastAllocatedBytes = currentAllocated;
+
+        // GC counts
+        int gen0 = GC.CollectionCount(0);
+        int gen1 = GC.CollectionCount(1);
+        int gen2 = GC.CollectionCount(2);
+
+        _gc0Delta = gen0 - _gc0Prev;
+        _gc1Delta = gen1 - _gc1Prev;
+        _gc2Delta = gen2 - _gc2Prev;
+
+        _gc0Prev = gen0;
+        _gc1Prev = gen1;
+        _gc2Prev = gen2;
+
+    }
+
+    private void updateExtraMetrics()
+    {
+        if (_debugRibbonOptions.ShowBatteryUsage)
+            updateBatteryUsage();
+
+        //if (_debugRibbonOptions.ShowNetworkStats)
+        //    updateNetworkStats();
+
+    }
+
+    //private void updateNetworkStats()
+    //{
+    //NETWORK FOR MOMENT IS STILL IN TEST AND NOT FULLY TESTED
+
+    //var profiler = NetworkProfiler.Instance;
+
+    //totalRequests = profiler.TotalRequests;
+    //totalSent = profiler.TotalBytesSent;
+    //totalReceived = profiler.TotalBytesReceived;
+    //avgRequestTime = profiler.AverageRequestTimeMs;
+
+    //totalReceivedPerSecond = profiler.BytesReceivedPerSecond;
+    //totalSentPerSecond = profiler.BytesSentPerSecond;
+    //totalRequestsPerSecond = profiler.RequestsPerSecond;
+    //}
+
+    private void updateBatteryUsage()
+    {
+#if ANDROID
+        try
+        {
+            _batteryMilliW = BatteryService.GetBatteryMilliW();
+            _batteryMilliWAvailable = true;
+        }
+        catch
+        {
+            _batteryMilliW = 0;
+            _batteryMilliWAvailable = false;
+        }
+#else
+            _batteryMilliW = 0;
+            _batteryMilliWAvailable = false;
+#endif
+    }
+
+    private double calculateOverallScore()
+    {
+        double score = 0;
+
+        // FPS (max 3 puncte)
+        if (_emaFps >= 50) score += 3;
+        else if (_emaFps >= 30) score += 2;
+        else score += 1;
+
+        // CPU (max 3 puncte)
+        if (_cpuUsage < 30) score += 3;
+        else if (_cpuUsage < 60) score += 2;
+        else score += 1;
+
+        // Memory (max 2 puncte)
+        if (_memoryUsage < 260) score += 2;
+        else if (_memoryUsage < 400) score += 1;
+        // >400 → 0
+
+        // Threads (max 2 puncte)
+        if (_threadCount < 50) score += 2;
+        else if (_threadCount < 100) score += 1;
+        // >100 → 0
+
+        return score; // max 10
+    }
+
+    private void updateOverallScore(double rawScore)
+    {
+
+        if (_emaOverallScore == 0)
+            _emaOverallScore = rawScore;
+        else
+            _emaOverallScore = (_emaOverallAlpha * _emaOverallScore) + ((1 - _emaOverallAlpha) * rawScore);
+    }
+
+    #endregion
+
+    #endregion
 }
