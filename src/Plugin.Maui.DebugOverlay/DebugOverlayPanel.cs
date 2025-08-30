@@ -90,7 +90,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _stopwatch = new Stopwatch();
 
         _fpsService = new FpsService();
-        _fpsService.OnFrameTimeCalculated += _fpsService_OnFrameTimeCalculated;
+        _fpsService.OnFrameTimeCalculated += FpsService_OnFrameTimeCalculated;
     }
 
     public bool Contains(Point point)
@@ -891,7 +891,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
 
-        startMonitoringPerformances();
+        StartMonitoringPerformances();
     }
 
     public void Hide()
@@ -904,7 +904,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
 
-        stopMonitoringPerformances();
+        StopMonitoringPerformances();
     }
 
     public void Toggle()
@@ -1302,14 +1302,14 @@ public class DebugOverlayPanel : IWindowOverlayElement
     #endregion
 
     #region methods
-    private void startMonitoringPerformances()
+    private void StartMonitoringPerformances()
     {
         _stopRequested = false;
         _fpsService?.Start();
-        startMetrics();
+        StartMetrics();
     }
 
-    private void startMetrics()
+    private void StartMetrics()
     {
         _stopwatch.Restart();
         _prevCpuTime = _currentProcess.TotalProcessorTime;
@@ -1317,9 +1317,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
         Microsoft.Maui.Controls.Application.Current!.Dispatcher.StartTimer(TimeSpan.FromSeconds(1), () =>
         {
             if (_debugRibbonOptions.ShowAlloc_GC)
-                updateGcAndAllocMetrics();
+                UpdateGcAndAllocMetrics();
 
-            updateExtraMetrics();
+            UpdateExtraMetrics();
 
             if (_debugRibbonOptions.ShowCPU_Usage)
             {
@@ -1336,27 +1336,27 @@ public class DebugOverlayPanel : IWindowOverlayElement
             }
             _stopwatch.Restart();
 
-            _overallScore = calculateOverallScore();
-            updateOverallScore(_overallScore);
+            //_overallScore = CalculateOverallScore();
+            //UpdateOverallScore(_overallScore);
 
-            MainThread.BeginInvokeOnMainThread(invalidateOverlayToForceRedraw);
+            MainThread.BeginInvokeOnMainThread(InvalidateOverlayToForceRedraw);
 
             return !_stopRequested;
         });
     }
 
-    private void invalidateOverlayToForceRedraw()
+    private void InvalidateOverlayToForceRedraw()
     {
         _overlay.Invalidate();
     }
 
-    private void stopMonitoringPerformances()
+    private void StopMonitoringPerformances()
     {
         _fpsService?.Stop();
         _stopRequested = true;
     }
 
-    private void _fpsService_OnFrameTimeCalculated(double frameTimeMs)
+    private void FpsService_OnFrameTimeCalculated(double frameTimeMs)
     {
         const double MinFrameTime = 0.1; // ms, pentru a evita diviziunea la zero
         frameTimeMs = Math.Max(frameTimeMs, MinFrameTime);
@@ -1388,7 +1388,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
 
 
-    private void updateGcAndAllocMetrics()
+    private void UpdateGcAndAllocMetrics()
     {
         double elapsedSec = _stopwatch.Elapsed.TotalSeconds;
         if (elapsedSec <= 0) elapsedSec = 1; // fallback
@@ -1414,10 +1414,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     }
 
-    private void updateExtraMetrics()
+    private void UpdateExtraMetrics()
     {
         if (_debugRibbonOptions.ShowBatteryUsage)
-            updateBatteryUsage();
+            UpdateBatteryUsage();
 
         //if (_debugRibbonOptions.ShowNetworkStats)
         //    updateNetworkStats();
@@ -1440,7 +1440,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
     //totalRequestsPerSecond = profiler.RequestsPerSecond;
     //}
 
-    private void updateBatteryUsage()
+    private void UpdateBatteryUsage()
     {
 #if ANDROID
         try
@@ -1459,41 +1459,41 @@ public class DebugOverlayPanel : IWindowOverlayElement
 #endif
     }
 
-    private double calculateOverallScore()
-    {
-        double score = 0;
+    //private double CalculateOverallScore()
+    //{
+    //    double score = 0;
 
-        // FPS (max 3 puncte)
-        if (_emaFps >= 50) score += 3;
-        else if (_emaFps >= 30) score += 2;
-        else score += 1;
+    //    // FPS (max 3 puncte)
+    //    if (_emaFps >= 50) score += 3;
+    //    else if (_emaFps >= 30) score += 2;
+    //    else score += 1;
 
-        // CPU (max 3 puncte)
-        if (_cpuUsage < 30) score += 3;
-        else if (_cpuUsage < 60) score += 2;
-        else score += 1;
+    //    // CPU (max 3 puncte)
+    //    if (_cpuUsage < 30) score += 3;
+    //    else if (_cpuUsage < 60) score += 2;
+    //    else score += 1;
 
-        // Memory (max 2 puncte)
-        if (_memoryUsage < 260) score += 2;
-        else if (_memoryUsage < 400) score += 1;
-        // >400 → 0
+    //    // Memory (max 2 puncte)
+    //    if (_memoryUsage < 260) score += 2;
+    //    else if (_memoryUsage < 400) score += 1;
+    //    // >400 → 0
 
-        // Threads (max 2 puncte)
-        if (_threadCount < 50) score += 2;
-        else if (_threadCount < 100) score += 1;
-        // >100 → 0
+    //    // Threads (max 2 puncte)
+    //    if (_threadCount < 50) score += 2;
+    //    else if (_threadCount < 100) score += 1;
+    //    // >100 → 0
 
-        return score; // max 10
-    }
+    //    return score; // max 10
+    //}
 
-    private void updateOverallScore(double rawScore)
-    {
+    //private void UpdateOverallScore(double rawScore)
+    //{
 
-        if (_emaOverallScore == 0)
-            _emaOverallScore = rawScore;
-        else
-            _emaOverallScore = (_emaOverallAlpha * _emaOverallScore) + ((1 - _emaOverallAlpha) * rawScore);
-    }
+    //    if (_emaOverallScore == 0)
+    //        _emaOverallScore = rawScore;
+    //    else
+    //        _emaOverallScore = (_emaOverallAlpha * _emaOverallScore) + ((1 - _emaOverallAlpha) * rawScore);
+    //}
 
     #endregion
 
