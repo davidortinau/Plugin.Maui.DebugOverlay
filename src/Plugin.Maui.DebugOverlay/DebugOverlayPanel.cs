@@ -64,6 +64,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float ContentPadding = 15; // Padding for content inside panel
     private const float ButtonHeight = 36;
     private const float ButtonSpacing = 8;
+    private const float LabelHeight = 28;
+    private const float LabelSpacing = 0;
     private const float Padding = 12;
 
     public bool IsVisible
@@ -103,6 +105,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private (float top, float bottom, float left, float right) GetSafeAreaInsets(RectF windowRect)
     {
+        //TODO Need refactor because useless multiple calls. You can store value and update values from public override void HandleUIChange()
+
         // Default safe area insets
         float top = 50f;    // Status bar + notch area
         float bottom = 34f; // Home indicator area  
@@ -126,20 +130,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             // Fall back to defaults
         }
 #elif ANDROID
-        try
-        {
-            // Basic Android status bar height detection
-            var context = Platform.CurrentActivity ?? Android.App.Application.Context;
-            var resourceId = context.Resources?.GetIdentifier("status_bar_height", "dimen", "android");
-            if (resourceId.HasValue && resourceId > 0 && context.Resources != null)
-            {
-                top = context.Resources.GetDimensionPixelSize(resourceId.Value) / context.Resources.DisplayMetrics.Density;
-            }
-        }
-        catch
-        {
-            // Fall back to defaults
-        }
+        top = SafeAreaService.GetTopSafeAreaInset();
 #endif
 
         return (top, bottom, left, right);
@@ -165,9 +156,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 dirtyRect.Width - safeLeft - safeRight - (ContentPadding * 2),
                 dirtyRect.Height - safeTop - safeBottom - (ContentPadding * 2));
 
-            if (_currentState == PanelState.TreeView)
+            if (_currentState == PanelState.PerformancesView)
             {
                 //recalc contentRect
+                var perfViewHeight = CalculatePerformanceViewHeight();
+                contentRect = new RectF(0+ ContentPadding, safeTop, 200 - (ContentPadding * 2), perfViewHeight);
+                _panelRect = new RectF(0, safeTop, 200, perfViewHeight);
             }
 
             // Draw panel background => edge-to-edge  if !TreeView
@@ -188,9 +182,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 DrawBackButton(canvas, contentRect);
                 DrawScrollButtons(canvas, contentRect);
             }
-            else if (_currentState == PanelState.TreeView)
+            else if (_currentState == PanelState.PerformancesView)
             {
                 //draw items
+                DrawPerformancesViewHeader(canvas, _panelRect);
+                DrawBackButton(canvas, _panelRect);
+                DrawPerformancesItems(canvas, contentRect);
             }
         }
         catch (Exception ex)
@@ -259,60 +256,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Shell Hierarchy Button
         buttonY += ButtonHeight + ButtonSpacing;
         _performancesViewButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, _performancesViewButtonRect, "📈 View Performances", _buttonBackgroundColor);
+        DrawButton(canvas, _performancesViewButtonRect, "📊 View Performances", _buttonBackgroundColor);
 
-        //var buttonRect = RectF.Zero;
-        //if (_debugRibbonOptions.ShowFrame)
-        //{
-        //    // FPS
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}   ⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor);
-
-        //    //Hitch
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms  💥 Highest: {_emaHighestHitch:F0} ms", _buttonBackgroundColor);
-        //}
-
-        //if (_debugRibbonOptions.ShowAlloc_GC)
-        //{
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor);
-
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
-        //}
-
-        //if (_debugRibbonOptions.ShowMemory)
-        //{
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor);
-        //}
-
-        //if (_debugRibbonOptions.ShowCPU_Usage)
-        //{
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        //    DrawButton(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor);
-        //}
-
-        //if (_debugRibbonOptions.ShowBatteryUsage)
-        //{
-        //    buttonY += ButtonHeight + ButtonSpacing;
-        //    buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-
-        //    var textToShow = $"🔋 Battery consumption: ";
-        //    if (_batteryMilliWAvailable)
-        //        textToShow += $"{_batteryMilliW:F1} mW";
-        //    else
-        //        textToShow += "N/A";
-
-        //    DrawButton(canvas, buttonRect, textToShow, _buttonBackgroundColor);
-        //}
     }
 
     private void DrawButton(ICanvas canvas, RectF rect, string text, Color backgroundColor)
@@ -333,6 +278,19 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.FontSize = 12;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
         canvas.DrawString(text, rect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        canvas.RestoreState();
+    }
+
+    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor)
+    {
+        canvas.SaveState();
+         
+        // Label text
+        canvas.FontColor = _textColor;
+        canvas.FontSize = 12;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
+        canvas.DrawString(text, rect, HorizontalAlignment.Left, VerticalAlignment.Center);
 
         canvas.RestoreState();
     }
@@ -662,6 +620,113 @@ public class DebugOverlayPanel : IWindowOverlayElement
         return nextY;
     }
 
+
+    #region Draw Performances Methods
+    private void DrawPerformancesViewHeader(ICanvas canvas, RectF contentRect)
+    {
+        _headerRect = new RectF(contentRect.X, contentRect.Y, contentRect.Width, 50);
+
+        canvas.SaveState();
+
+        // Header background
+        canvas.FillColor = Color.FromArgb("#FF2D2D30");
+        canvas.FillRoundedRectangle(_headerRect, 4);
+
+        // Title text
+        canvas.FontColor = _textColor;
+        canvas.FontSize = 14;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
+
+        var headerText = "           📊 Performance Monitor";
+        canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+
+
+        canvas.RestoreState();
+    }
+
+    private void DrawPerformancesItems(ICanvas canvas, RectF contentRect)
+    {
+        var buttonY = _headerRect.Bottom + LabelSpacing;
+        var buttonWidth = contentRect.Width;
+
+        var buttonRect = RectF.Zero;
+        if (_debugRibbonOptions.ShowFrame)
+        {
+            // FPS
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor);
+
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor);
+
+            //Hitch
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor);
+
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowAlloc_GC)
+        {
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor);
+
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowMemory)
+        {
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowCPU_Usage)
+        {
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor);
+        }
+
+        if (_debugRibbonOptions.ShowBatteryUsage)
+        {
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+
+            var textToShow = $"🔋 Batt. Cons.: ";
+            if (_batteryMilliWAvailable)
+                textToShow += $"{_batteryMilliW:F1} mW";
+            else
+                textToShow += "N/A";
+
+            DrawLabel(canvas, buttonRect, textToShow, _buttonBackgroundColor);
+        }
+    }
+
+    private float CalculatePerformanceViewHeight()
+    {
+        int lines = 0;
+
+        if (_debugRibbonOptions.ShowFrame) lines += 4;
+        if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
+        if (_debugRibbonOptions.ShowMemory) lines += 1;
+        if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
+        if (_debugRibbonOptions.ShowBatteryUsage) lines += 1;
+         
+
+        int headerHeight = 50;
+        return headerHeight + lines * (LabelHeight + LabelSpacing);
+    }
+    #endregion
+
     /// <summary>
     /// Handles tap events on the panel. Returns true if the tap was handled.
     /// </summary>
@@ -683,7 +748,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 return HandleTreeViewTap(point);
             }
-
+            else if (_currentState == PanelState.PerformancesView)
+            {
+                return HandlePerformancesViewTap(point);
+            }
             // Panel was tapped but no specific element - consume the tap to prevent closing
             return true;
         }
@@ -825,6 +893,27 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Handle normal tree node tapping
         HandleTreeNodeTap(point);
+
+        return true;
+    }
+
+    private bool HandlePerformancesViewTap(Point point)
+    {
+        // Check if back button was tapped
+        if (_backButtonRect.Contains(point))
+        {
+            _currentState = PanelState.MainMenu;
+            _currentTreeData = null;
+            _scrollOffset = 0;
+            _isScrolling = false; // Reset scroll state
+            _overlay.Invalidate();
+            return true;
+        }
+
+       
+
+       
+         
 
         return true;
     }
