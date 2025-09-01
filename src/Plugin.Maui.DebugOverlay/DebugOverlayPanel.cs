@@ -186,7 +186,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 //draw items
                 DrawPerformancesViewHeader(canvas, _panelRect);
-                DrawBackButton(canvas, _panelRect);
+                DrawPerformanceBackButton(canvas, _panelRect);
                 DrawPerformancesItems(canvas, contentRect);
             }
         }
@@ -637,7 +637,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.FontSize = 14;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
 
-        var headerText = "           📊 Performance Monitor";
+        var headerText = "         📊 Performance Monitor";
         canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Center, VerticalAlignment.Center);
 
 
@@ -709,6 +709,45 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             DrawLabel(canvas, buttonRect, textToShow, _buttonBackgroundColor);
         }
+    }
+
+    private void DrawPerformanceBackButton(ICanvas canvas, RectF contentRect)
+    {
+        var backButtonSize = 26f;
+        var margin = 6f;
+        // Center the back button vertically within the header area (header height is 50px)
+        var headerHeight = 50f;
+        var buttonY = contentRect.Y + (headerHeight - backButtonSize) / 2;
+
+        _backButtonRect = new RectF(
+            contentRect.X + margin,
+            buttonY,
+            backButtonSize,
+            backButtonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_backButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_backButtonRect, 4);
+
+        // Draw back arrow
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 3;
+        var centerX = _backButtonRect.Center.X;
+        var centerY = _backButtonRect.Center.Y;
+        var size = 6f;
+
+        // Arrow shape: <
+        canvas.DrawLine(centerX + size / 2, centerY - size, centerX - size / 2, centerY);
+        canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY + size);
+
+        canvas.RestoreState();
     }
 
     private float CalculatePerformanceViewHeight()
