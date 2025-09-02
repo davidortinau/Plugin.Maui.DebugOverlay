@@ -15,12 +15,12 @@
         /// <summary>
         /// Show GC and allocations (collections count, total memory).
         /// </summary>
-        internal bool ShowAlloc_GC { get; private set; } = true;
+        internal bool ShowAlloc_GC { get; private set; } = false;
 
         /// <summary>
         /// Show CPU usage (total, app) and threads.
         /// </summary>
-        internal bool ShowCPU_Usage { get; private set; } = true;
+        internal bool ShowCPU_Usage { get; private set; } = false;
 
         /// <summary>
         /// Show memory usage (total, app).
@@ -30,7 +30,7 @@
         /// <summary>
         /// Show frames per second (FPS) and frame time (ms).
         /// </summary>
-        internal bool ShowFrame { get; private set; } = true;
+        internal bool ShowFrame { get; private set; } = false;
 
 
 
@@ -49,45 +49,45 @@
         /// <summary>
         /// Enable or disable battery usage display (Android only).
         /// </summary>
-        public DebugRibbonOptions EnableBatteryUsage(bool enable = true)
+        public DebugRibbonOptions EnableBatteryUsage()
         {
-            ShowBatteryUsage = enable;
+            ShowBatteryUsage = true;
             return this;
         }
 
         /// <summary>
         /// Enable or disable GC and allocations display.
         /// </summary>
-        public DebugRibbonOptions EnableGC(bool enable = true)
+        public DebugRibbonOptions EnableGC()
         {
-            ShowAlloc_GC = enable;
+            ShowAlloc_GC = true;
             return this;
         }
 
         /// <summary>
         /// Enable or disable CPU usage display.
         /// </summary>
-        public DebugRibbonOptions EnableCPU(bool enable = true)
+        public DebugRibbonOptions EnableCPU()
         {
-            ShowCPU_Usage = enable;
+            ShowCPU_Usage = true;
             return this;
         }
 
         /// <summary>
         /// Enable or disable memory usage display.
         /// </summary>
-        public DebugRibbonOptions EnableMemory(bool enable = true)
+        public DebugRibbonOptions EnableMemory()
         {
-            ShowMemory = enable;
+            ShowMemory = true;
             return this;
         }
 
         /// <summary>
         /// Enable or disable FPS display.
         /// </summary>
-        public DebugRibbonOptions EnableFrame(bool enable = true)
+        public DebugRibbonOptions EnableFrame()
         {
-            ShowFrame = enable;
+            ShowFrame = true;
             return this;
         }
     }

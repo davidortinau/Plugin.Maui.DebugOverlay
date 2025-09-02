@@ -16,7 +16,7 @@ public static class MauiProgram
 					.EnableBatteryUsage()
 					.EnableGC()
 					.EnableCPU()
-					.EnableMemory(true)
+					.EnableMemory()
 					.EnableFrame();
             })
 			.ConfigureFonts(fonts =>
