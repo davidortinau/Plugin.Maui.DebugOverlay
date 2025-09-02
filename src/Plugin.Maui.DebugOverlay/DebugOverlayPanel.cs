@@ -1,3 +1,4 @@
+using Microsoft.Maui.Graphics.Text;
 using Plugin.Maui.DebugOverlay.Platforms;
 using System.Diagnostics;
 using System.Reflection;
@@ -160,7 +161,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 //recalc contentRect
                 var perfViewHeight = CalculatePerformanceViewHeight();
-                contentRect = new RectF(0+ ContentPadding, safeTop, 200 - (ContentPadding * 2), perfViewHeight);
+                contentRect = new RectF(0 + ContentPadding, safeTop, 200 - (ContentPadding * 2), perfViewHeight);
                 _panelRect = new RectF(0, safeTop, 200, perfViewHeight);
             }
 
@@ -282,12 +283,15 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
-    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor)
+    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor, Color textColor = null)
     {
         canvas.SaveState();
-         
+
+        if (textColor == null)
+            textColor = _textColor;
+
         // Label text
-        canvas.FontColor = _textColor;
+        canvas.FontColor = textColor;
         canvas.FontSize = 12;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
         canvas.DrawString(text, rect, HorizontalAlignment.Left, VerticalAlignment.Center);
@@ -651,31 +655,38 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var buttonWidth = contentRect.Width;
 
         var buttonRect = RectF.Zero;
+        Color textColor = Colors.White;
+
         if (_debugRibbonOptions.ShowFrame)
         {
             // FPS
+            textColor = CalculateColorFromPerformanceVale(_emaFps, 50, 30);
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor, textColor);
 
+            textColor = CalculateColorFromPerformanceVale(_emaFrameTime, 17, 33, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
 
             //Hitch
+            textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
 
+            textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
         }
 
         if (_debugRibbonOptions.ShowAlloc_GC)
         {
+            textColor = CalculateColorFromPerformanceVale(_allocPerSec, 5, 10, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor, textColor);
 
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
@@ -684,26 +695,33 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         if (_debugRibbonOptions.ShowMemory)
         {
+            textColor = CalculateColorFromPerformanceVale(_memoryUsage, 260, 400, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor, textColor);
         }
 
         if (_debugRibbonOptions.ShowCPU_Usage)
         {
+            textColor = (_threadCount < 50 && _cpuUsage < 30) ? _textColor :
+                        (_threadCount < 100 && _cpuUsage < 60) ? Colors.Goldenrod : Colors.Red;
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor);
+            DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor, textColor);
         }
 
         if (_debugRibbonOptions.ShowBatteryUsage)
         {
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            textColor = _textColor;
 
             var textToShow = $"🔋 Batt. Cons.: ";
             if (_batteryMilliWAvailable)
+            {
+                textColor = CalculateColorFromPerformanceVale(_batteryMilliW, 100, 500, true);
                 textToShow += $"{_batteryMilliW:F1} mW";
+            }
             else
                 textToShow += "N/A";
 
@@ -759,10 +777,20 @@ public class DebugOverlayPanel : IWindowOverlayElement
         if (_debugRibbonOptions.ShowMemory) lines += 1;
         if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
         if (_debugRibbonOptions.ShowBatteryUsage) lines += 1;
-         
+
 
         int headerHeight = 50;
         return headerHeight + lines * (LabelHeight + LabelSpacing);
+    }
+
+    private Color CalculateColorFromPerformanceVale(double value, double okValue, double middleValue, bool isLower = false)
+    {
+        if (isLower)
+            return value <= okValue ? _textColor :
+                   value <= middleValue ? Colors.Goldenrod : Colors.Red;
+        else
+            return value >= okValue ? _textColor :
+                    value >= middleValue ? Colors.Goldenrod : Colors.Red;
     }
     #endregion
 
@@ -949,10 +977,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
             return true;
         }
 
-       
 
-       
-         
+
+
+
 
         return true;
     }
