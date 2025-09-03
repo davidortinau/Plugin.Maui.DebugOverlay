@@ -674,16 +674,19 @@ public class DebugOverlayPanel : IWindowOverlayElement
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor, textColor);
 
-            textColor = CalculateColorFromPerformanceVale(_emaFrameTime, 17, 33, true);
-            buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
+            if (!_isPerformanceMinimized)
+            {
+                textColor = CalculateColorFromPerformanceVale(_emaFrameTime, 17, 33, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
 
-            //Hitch
-            textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
-            buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
+                //Hitch
+                textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
+            }
 
             textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
@@ -691,7 +694,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
         }
 
-        if (_debugRibbonOptions.ShowAlloc_GC)
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowAlloc_GC)
         {
             textColor = CalculateColorFromPerformanceVale(_allocPerSec, 5, 10, true);
             buttonY += LabelHeight + LabelSpacing;
@@ -703,7 +706,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             DrawLabel(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
         }
 
-        if (_debugRibbonOptions.ShowMemory)
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowMemory)
         {
             textColor = CalculateColorFromPerformanceVale(_memoryUsage, 260, 400, true);
             buttonY += LabelHeight + LabelSpacing;
@@ -711,7 +714,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor, textColor);
         }
 
-        if (_debugRibbonOptions.ShowCPU_Usage)
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowCPU_Usage)
         {
             textColor = (_threadCount < 50 && _cpuUsage < 30) ? _textColor :
                         (_threadCount < 100 && _cpuUsage < 60) ? Colors.Goldenrod : Colors.Red;
@@ -720,7 +723,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor, textColor);
         }
 
-        if (_debugRibbonOptions.ShowBatteryUsage)
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowBatteryUsage)
         {
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
@@ -801,12 +804,29 @@ public class DebugOverlayPanel : IWindowOverlayElement
         //   minimize
         canvas.StrokeColor = Colors.White;
         canvas.StrokeSize = 2;
-
-        centerX = _minimizeButtonRect.Center.X;
-        centerY = _minimizeButtonRect.Center.Y + _minimizeButtonRect.Height / 4;
         size = 12;
 
-        canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY);
+        if (_isPerformanceMinimized)
+        {
+            centerX = _minimizeButtonRect.Center.X;
+            centerY = _minimizeButtonRect.Center.Y;
+
+            float left = centerX - size / 2;
+            float top = centerY - size / 2;
+
+            canvas.StrokeColor = Colors.White;
+            canvas.StrokeSize = 2;
+            canvas.FillColor = Colors.Transparent;
+
+            canvas.DrawRectangle(left, top, size, size);
+        }
+        else
+        {
+            centerX = _minimizeButtonRect.Center.X;
+            centerY = _minimizeButtonRect.Center.Y + _minimizeButtonRect.Height / 4;
+
+            canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY);
+        }
 
         canvas.RestoreState();
         #endregion
@@ -864,13 +884,16 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private float CalculatePerformanceViewHeight()
     {
-        int lines = 0;
+        int lines = 2;
 
-        if (_debugRibbonOptions.ShowFrame) lines += 4;
-        if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
-        if (_debugRibbonOptions.ShowMemory) lines += 1;
-        if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
-        if (_debugRibbonOptions.ShowBatteryUsage) lines += 1;
+        if (!_isPerformanceMinimized)
+        { 
+            if (_debugRibbonOptions.ShowFrame) lines += 2;
+            if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
+            if (_debugRibbonOptions.ShowMemory) lines += 1;
+            if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
+            if (_debugRibbonOptions.ShowBatteryUsage) lines += 1;
+        }
 
 
         int headerHeight = 50;
@@ -938,7 +961,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                         _isMovingPerformance = true;
                         performanceStartedYpos = performanceYpos;
                         performanceStartedXpos = performanceXpos;
-                    } 
+                    }
                     break;
 
                 case GlobalPanGesture.GestureStatus.Completed:
@@ -1105,7 +1128,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Check if move was tapped
         if (_moveButtonRect.Contains(point))
-        { 
+        {
             _overlay.Invalidate();
             return true;
         }
@@ -1114,7 +1137,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Check if minimize button was tapped
         if (_minimizeButtonRect.Contains(point))
         {
-            _isPerformanceMinimized = true;
+            _isPerformanceMinimized = !_isPerformanceMinimized;
             _overlay.Invalidate();
             return true;
         }
@@ -1325,6 +1348,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                _isPerformanceMinimized = false;
                 _currentState = PanelState.PerformancesView;
                 _overlay.Invalidate();
             });
