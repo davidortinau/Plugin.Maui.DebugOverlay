@@ -40,6 +40,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private RectF _performancesViewButtonRect;
     private RectF _headerRect;
     private RectF _backButtonRect;
+    private RectF _minimizeButtonRect;
+    private RectF _moveButtonRect;
     private RectF _scrollUpButtonRect;
     private RectF _scrollDownButtonRect;
     private RectF _exportButtonRect;
@@ -68,6 +70,14 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float LabelHeight = 28;
     private const float LabelSpacing = 0;
     private const float Padding = 12;
+
+    private bool _isMovingPerformance = false;
+    private bool _isPerformanceMinimized = false;
+    private float performanceStartedXpos = 0;
+    private float performanceStartedYpos = 0;
+
+    private float performanceXpos = 0;
+    private float performanceYpos = 0;
 
     public bool IsVisible
     {
@@ -161,8 +171,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 //recalc contentRect
                 var perfViewHeight = CalculatePerformanceViewHeight();
-                contentRect = new RectF(0 + ContentPadding, safeTop, 200 - (ContentPadding * 2), perfViewHeight);
-                _panelRect = new RectF(0, safeTop, 200, perfViewHeight);
+                contentRect = new RectF(performanceXpos + ContentPadding, performanceYpos + safeTop, 220 - (ContentPadding * 2), perfViewHeight);
+                _panelRect = new RectF(performanceXpos, performanceYpos + safeTop, 220, perfViewHeight);
             }
 
             // Draw panel background => edge-to-edge  if !TreeView
@@ -187,7 +197,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 //draw items
                 DrawPerformancesViewHeader(canvas, _panelRect);
-                DrawPerformanceBackButton(canvas, _panelRect);
+                DrawPerformancesHeaderButtons(canvas, _panelRect);
                 DrawPerformancesItems(canvas, contentRect);
             }
         }
@@ -641,8 +651,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.FontSize = 14;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
 
-        var headerText = "         📊 Performance Monitor";
-        canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+        var headerText = "📊 Metrics";
+        canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Left, VerticalAlignment.Center);
 
 
 
@@ -729,19 +739,21 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
     }
 
-    private void DrawPerformanceBackButton(ICanvas canvas, RectF contentRect)
+
+    private void DrawPerformancesHeaderButtons(ICanvas canvas, RectF contentRect)
     {
-        var backButtonSize = 26f;
+        var buttonSize = 26f;
         var margin = 6f;
         // Center the back button vertically within the header area (header height is 50px)
         var headerHeight = 50f;
-        var buttonY = contentRect.Y + (headerHeight - backButtonSize) / 2;
+        var buttonY = contentRect.Y + (headerHeight - buttonSize) / 2;
 
+        #region back button
         _backButtonRect = new RectF(
-            contentRect.X + margin,
+            contentRect.X + 220 - _backButtonRect.Width - 2 * margin,
             buttonY,
-            backButtonSize,
-            backButtonSize);
+            buttonSize,
+            buttonSize);
 
         canvas.SaveState();
 
@@ -754,18 +766,100 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.StrokeSize = 1;
         canvas.DrawRoundedRectangle(_backButtonRect, 4);
 
-        // Draw back arrow
+        // Draw X
         canvas.StrokeColor = Colors.White;
-        canvas.StrokeSize = 3;
+        canvas.StrokeSize = 2;
         var centerX = _backButtonRect.Center.X;
         var centerY = _backButtonRect.Center.Y;
         var size = 6f;
 
-        // Arrow shape: <
-        canvas.DrawLine(centerX + size / 2, centerY - size, centerX - size / 2, centerY);
-        canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY + size);
+        canvas.DrawLine(centerX - size, centerY - size, centerX + size, centerY + size);
+        canvas.DrawLine(centerX - size, centerY + size, centerX + size, centerY - size);
+
 
         canvas.RestoreState();
+        #endregion
+
+        #region minimize button
+        _minimizeButtonRect = new RectF(
+              contentRect.X + 220 - 3 * _backButtonRect.Width - 6 * margin,
+                buttonY,
+                buttonSize,
+                buttonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_minimizeButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_minimizeButtonRect, 4);
+
+        //   minimize
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+
+        centerX = _minimizeButtonRect.Center.X;
+        centerY = _minimizeButtonRect.Center.Y + _minimizeButtonRect.Height / 4;
+        size = 12;
+
+        canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY);
+
+        canvas.RestoreState();
+        #endregion
+
+        #region move button
+        _moveButtonRect = new RectF(
+                contentRect.X + 220 - 2 * _backButtonRect.Width - 4 * margin,
+                buttonY,
+                buttonSize,
+                buttonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_moveButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_moveButtonRect, 4);
+
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+
+        centerX = _moveButtonRect.Center.X;
+        centerY = _moveButtonRect.Center.Y;
+        size = 8;   // jumătate din lungimea liniilor
+        float arrowSize = 3; // dimensiunea săgeților
+
+        // Linie orizontală
+        canvas.DrawLine(centerX - size, centerY, centerX + size, centerY);
+
+        // Săgeți la capetele liniei orizontale
+        canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY - arrowSize);
+        canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY + arrowSize);
+
+        canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY - arrowSize);
+        canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY + arrowSize);
+
+        // Linie verticală
+        canvas.DrawLine(centerX, centerY - size, centerX, centerY + size);
+
+        // Săgeți la capetele liniei verticale
+        canvas.DrawLine(centerX, centerY - size, centerX - arrowSize, centerY - size + arrowSize);
+        canvas.DrawLine(centerX, centerY - size, centerX + arrowSize, centerY - size + arrowSize);
+
+        canvas.DrawLine(centerX, centerY + size, centerX - arrowSize, centerY + size - arrowSize);
+        canvas.DrawLine(centerX, centerY + size, centerX + arrowSize, centerY + size - arrowSize);
+
+
+        canvas.RestoreState();
+        #endregion
     }
 
     private float CalculatePerformanceViewHeight()
@@ -826,6 +920,37 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             Debug.WriteLine($"Error handling panel tap: {ex.Message}");
             return true; // Still consume the tap to prevent issues
+        }
+    }
+
+    /// <summary>
+    /// Handles Pan update on window
+    /// </summary>
+    internal void HandlePanUpdate(object s, GlobalPanGesture.PanEventArgs e)
+    {
+        if (_currentState == PanelState.PerformancesView)
+        {
+            switch (e.Status)
+            {
+                case GlobalPanGesture.GestureStatus.Started:
+                    if (_panelRect.Contains(new Point(e.X, e.Y)))
+                    {
+                        _isMovingPerformance = true;
+                        performanceStartedYpos = performanceYpos;
+                        performanceStartedXpos = performanceXpos;
+                    } 
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Completed:
+                    _isMovingPerformance = false;
+                    break;
+            }
+            if (_isMovingPerformance)
+            {
+                performanceXpos = performanceStartedXpos + (float)e.TotalX;
+                performanceYpos = performanceStartedYpos + (float)e.TotalY;
+                _overlay.Invalidate();
+            }
         }
     }
 
@@ -978,10 +1103,21 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
 
 
+        // Check if move was tapped
+        if (_moveButtonRect.Contains(point))
+        { 
+            _overlay.Invalidate();
+            return true;
+        }
 
 
-
-
+        // Check if minimize button was tapped
+        if (_minimizeButtonRect.Contains(point))
+        {
+            _isPerformanceMinimized = true;
+            _overlay.Invalidate();
+            return true;
+        }
         return true;
     }
 
@@ -1663,6 +1799,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _batteryMilliWAvailable = false;
 #endif
     }
+
+
 
     //private double CalculateOverallScore()
     //{

@@ -5,4 +5,11 @@
              Title="Debug Overlay Plugin">
 
     <!-- Add something that makes sense for your plugin here -->
+
+    <ContentPage.Content>
+        <VerticalStackLayout>
+            <Button Text="button Demo" />
+            <Label Text="Demo label" />
+        </VerticalStackLayout>
+    </ContentPage.Content>
 </ContentPage>

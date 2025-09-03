@@ -1,10 +1,12 @@
-using Plugin.Maui.DebugOverlay.Platforms;
+﻿using Plugin.Maui.DebugOverlay.Platforms;
 using System.Diagnostics;
-
 namespace Plugin.Maui.DebugOverlay;
 
+
+
+
 public class DebugOverlay : WindowOverlay
-{ 
+{
     private DebugRibbonElement _debugRibbonElement;
     private DebugOverlayPanel _debugPanel;
 
@@ -14,8 +16,7 @@ public class DebugOverlay : WindowOverlay
     private float _topInset;
 
     public DebugOverlay(IWindow window, DebugRibbonOptions debugRibbonOptions) : base(window)
-    { 
-
+    {
         // Create ribbon element (always shows "DEBUG")
         _debugRibbonElement = new DebugRibbonElement(this, labelText: "DEBUG", ribbonColor: debugRibbonOptions.RibbonColor);
         this.AddWindowElement(_debugRibbonElement);
@@ -26,8 +27,22 @@ public class DebugOverlay : WindowOverlay
 
         _isPanelVisible = false;
 
+
         Debug.WriteLine("DebugOverlay created with ribbon and panel elements");
         this.Tapped += DebugOverlay_Tapped;
+    
+        var pan = new GlobalPanGesture();
+        pan.PanUpdated += (s, e) =>
+        {
+            if (_isPanelVisible)
+            { 
+                _debugPanel.HandlePanUpdate(s, e);
+                return;  
+            }
+        };
+        pan.Attach(Window);
+
+
     }
 
     private void DebugOverlay_Tapped(object? sender, WindowOverlayTappedEventArgs e)
