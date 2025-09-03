@@ -71,6 +71,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float LabelSpacing = 0;
     private const float Padding = 12;
 
+    private float safeTop, safeBottom, safeLeft, safeRight;
+
     private bool _isMovingPerformance = false;
     private bool _isPerformanceMinimized = false;
     private float performanceStartedXpos = 0;
@@ -78,6 +80,11 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private float performanceXpos = 0;
     private float performanceYpos = 0;
+
+    private float dirtyRectWidth = 0;
+    private float dirtyRectHeight = 0;
+    private int _performanceViewPosState = 0;
+
 
     public bool IsVisible
     {
@@ -106,6 +113,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _fpsService = new FpsService();
         _fpsService.OnFrameTimeCalculated += FpsService_OnFrameTimeCalculated;
         _fpsService?.Start();
+
+        // Get safe area insets
+        var safe = GetSafeAreaInsets();
+        safeTop = safe.top;
+        safeBottom = safe.bottom;
+        safeLeft = safe.left;
+        safeRight = safe.right;
     }
 
     public bool Contains(Point point)
@@ -114,7 +128,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         return _isVisible;
     }
 
-    private (float top, float bottom, float left, float right) GetSafeAreaInsets(RectF windowRect)
+    private (float top, float bottom, float left, float right) GetSafeAreaInsets()
     {
         //TODO Need refactor because useless multiple calls. You can store value and update values from public override void HandleUIChange()
 
@@ -153,9 +167,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         try
         {
+            dirtyRectWidth = dirtyRect.Width;
+            dirtyRectHeight = dirtyRect.Height;
 
-            // Get safe area insets
-            var (safeTop, safeBottom, safeLeft, safeRight) = GetSafeAreaInsets(dirtyRect);
+
 
             // Panel background: edge-to-edge (full window)
             _panelRect = new RectF(0, 0, dirtyRect.Width, dirtyRect.Height);
@@ -644,7 +659,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Header background
         canvas.FillColor = Color.FromArgb("#FF2D2D30");
-        canvas.FillRoundedRectangle(_headerRect, 4);
+        canvas.FillRoundedRectangle(_headerRect, 8);
 
         // Title text
         canvas.FontColor = _textColor;
@@ -680,18 +695,21 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 buttonY += LabelHeight + LabelSpacing;
                 buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
                 DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
-
-                //Hitch
-                textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
-                buttonY += LabelHeight + LabelSpacing;
-                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-                DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
             }
 
-            textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
+            //Hitch
+            textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
+            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
+
+            if (!_isPerformanceMinimized)
+            {
+                textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
+            }
         }
 
         if (!_isPerformanceMinimized && _debugRibbonOptions.ShowAlloc_GC)
@@ -854,23 +872,23 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         centerX = _moveButtonRect.Center.X;
         centerY = _moveButtonRect.Center.Y;
-        size = 8;   // jumătate din lungimea liniilor
-        float arrowSize = 3; // dimensiunea săgeților
+        size = 8;
+        float arrowSize = 3;
 
-        // Linie orizontală
+        // horizontal line
         canvas.DrawLine(centerX - size, centerY, centerX + size, centerY);
 
-        // Săgeți la capetele liniei orizontale
+        // arrows at the ends of the horizontal line
         canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY - arrowSize);
         canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY + arrowSize);
 
         canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY - arrowSize);
         canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY + arrowSize);
 
-        // Linie verticală
+        // vertical line
         canvas.DrawLine(centerX, centerY - size, centerX, centerY + size);
 
-        // Săgeți la capetele liniei verticale
+        // arrows at the ends of the vertical line  
         canvas.DrawLine(centerX, centerY - size, centerX - arrowSize, centerY - size + arrowSize);
         canvas.DrawLine(centerX, centerY - size, centerX + arrowSize, centerY - size + arrowSize);
 
@@ -887,7 +905,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         int lines = 2;
 
         if (!_isPerformanceMinimized)
-        { 
+        {
             if (_debugRibbonOptions.ShowFrame) lines += 2;
             if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
             if (_debugRibbonOptions.ShowMemory) lines += 1;
@@ -1129,6 +1147,30 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Check if move was tapped
         if (_moveButtonRect.Contains(point))
         {
+            switch (_performanceViewPosState % 4)
+            {
+                case 0:
+                    performanceXpos = safeLeft;
+                    performanceYpos = safeTop;
+                    break;
+                case 1:
+                    performanceXpos = dirtyRectWidth - _panelRect.Width - safeRight;
+                    performanceYpos = safeTop;
+                    break;
+                case 2:
+                    performanceXpos = dirtyRectWidth - _panelRect.Width - safeRight;
+                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom - safeTop;
+                    break;
+                case 3:
+                    performanceXpos = safeLeft;
+                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom - safeTop;
+                    break;
+                default:
+                    performanceXpos = safeLeft;
+                    performanceYpos = safeTop;
+                    break;
+            }
+            _performanceViewPosState++;
             _overlay.Invalidate();
             return true;
         }
@@ -1222,7 +1264,6 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Return the height of the scrollable tree view area
         // This should match the height used in DrawTreeView
         var windowHeight = _panelRect.Height;
-        var (safeTop, safeBottom, _, _) = GetSafeAreaInsets(_panelRect);
         var contentHeight = windowHeight - safeTop - safeBottom - (ContentPadding * 2);
         var headerHeight = 50f; // Tree view header height
 
