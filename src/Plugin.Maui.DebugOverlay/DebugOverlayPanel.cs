@@ -771,7 +771,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         #region back button
         _backButtonRect = new RectF(
-            contentRect.X + 220 - _backButtonRect.Width - 2 * margin,
+            contentRect.X + 220 - buttonSize - 2 * margin,
             buttonY,
             buttonSize,
             buttonSize);
@@ -803,7 +803,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         #region minimize button
         _minimizeButtonRect = new RectF(
-              contentRect.X + 220 - 3 * _backButtonRect.Width - 6 * margin,
+              contentRect.X + 220 - 3 * buttonSize - 6 * margin,
                 buttonY,
                 buttonSize,
                 buttonSize);
@@ -851,7 +851,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         #region move button
         _moveButtonRect = new RectF(
-                contentRect.X + 220 - 2 * _backButtonRect.Width - 4 * margin,
+                contentRect.X + 220 - 2 * buttonSize - 4 * margin,
                 buttonY,
                 buttonSize,
                 buttonSize);
@@ -1147,30 +1147,30 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Check if move was tapped
         if (_moveButtonRect.Contains(point))
         {
+            _performanceViewPosState++;
             switch (_performanceViewPosState % 4)
             {
                 case 0:
-                    performanceXpos = safeLeft;
+                    performanceXpos = 0;
                     performanceYpos = safeTop;
                     break;
                 case 1:
-                    performanceXpos = dirtyRectWidth - _panelRect.Width - safeRight;
+                    performanceXpos = dirtyRectWidth - _panelRect.Width;
                     performanceYpos = safeTop;
                     break;
                 case 2:
-                    performanceXpos = dirtyRectWidth - _panelRect.Width - safeRight;
-                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom - safeTop;
+                    performanceXpos = dirtyRectWidth - _panelRect.Width;
+                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom;
                     break;
                 case 3:
-                    performanceXpos = safeLeft;
-                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom - safeTop;
+                    performanceXpos = 0;
+                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom;
                     break;
                 default:
-                    performanceXpos = safeLeft;
+                    performanceXpos = 0;
                     performanceYpos = safeTop;
                     break;
             }
-            _performanceViewPosState++;
             _overlay.Invalidate();
             return true;
         }
@@ -1637,10 +1637,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
     }
 
-
-
-
-
+     
     #region Performances
 
     #region variables
