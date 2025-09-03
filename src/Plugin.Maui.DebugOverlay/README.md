@@ -48,7 +48,16 @@ public static class MauiProgram
 
 #if DEBUG
         // Add debug ribbon overlay (only in debug builds)
-        builder.UseDebugRibbon(ribbonColor: Colors.MediumPurple); // Optional color parameter
+        builder.UseDebugRibbon(options =>
+        {
+            options
+                .SetRibbonColor(Color.FromArgb("#FF3300")) // Optional color parameter
+                .EnableBatteryUsage()
+                .EnableGC()
+                .EnableCPU()
+                .EnableMemory()
+                .EnableFrame();
+        })
 #endif
 
         return builder.Build();
@@ -83,6 +92,16 @@ The debug panel provides several tools:
 - **Output**: Debug console and saved to file  
 - **Use Case**: Navigation debugging and understanding Shell structure
 
+#### Performance Metrics  
+- **Button**: "_ Minimize window"
+- **Button**: "+ Move window accross all 4 edges"
+- **Functionality**: Tap & drag to move the window (not supported on Android) 
+- **Function**: Window shows real-time performance metrics:
+  - **Battery Usage**: Current battery level and charging status
+  - **Garbage Collection**: Number of collections per generation
+  - **CPU Usage**: Current CPU usage percentage
+  - **Memory Usage**: Current memory consumption
+  - **Frame Rate**: Current frames per second (FPS)
 ### Output Locations
 
 Debug dumps are written to multiple locations:
@@ -165,12 +184,18 @@ The plugin automatically detects different MAUI navigation patterns:
 
 ## Configuration
 
-### Ribbon Color Customization
+### Component Customization
 
 ```csharp
-builder.UseDebugRibbon(ribbonColor: Colors.Red);           // Red ribbon
-builder.UseDebugRibbon(ribbonColor: Colors.DeepSkyBlue);   // Blue ribbon
-builder.UseDebugRibbon(ribbonColor: Color.FromArgb("#FF6B35")); // Custom color
+   builder.UseDebugRibbon(options =>
+            {
+                options.SetRibbonColor(Color.FromArgb("#FF3300")) //change ribbon color
+                    .EnableBatteryUsage()
+                    .EnableGC()
+                    .EnableCPU()
+                    .EnableMemory()
+                    .EnableFrame();
+            })
 ```
 
 ### Dump Options (Programmatic Access)
@@ -189,10 +214,14 @@ var options = new VisualTreeDumpService.DumpOptions
 
 ## Platform Support
 
-- ✅ **iOS**: Full support
-- ✅ **Android**: Full support  
-- ✅ **Windows**: Full support
-- ✅ **macOS**: Full support
+- ⚠️ **iOS**: 
+    - BatteryUsage Metrics does not works
+- ⚠️ **Android**:
+    - Drag & Move does not work on Metrics Window 
+- ⚠️ **Windows**: 
+    - BatteryUsage Metrics does not works
+- ⚠️ **macOS**: 
+    - BatteryUsage Metrics does not works
 
 ## Development
 

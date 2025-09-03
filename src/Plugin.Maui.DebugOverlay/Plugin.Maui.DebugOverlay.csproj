@@ -20,8 +20,8 @@
 		<Authors>David Ortinau</Authors>
 		<Copyright>Copyright © David Ortinau and contributors</Copyright>
 		<IsPackable>True</IsPackable>
-		<PackageProjectUrl>https://github.com/jfversluis/Plugin.Maui.DebugOverlay</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/jfversluis/Plugin.Maui.DebugOverlay</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/davidortinau/Plugin.Maui.DebugOverlay</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/davidortinau/Plugin.Maui.DebugOverlay</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageTags>dotnet-maui;maui;plugin;</PackageTags>
 		<IncludeSymbols>True</IncludeSymbols>
