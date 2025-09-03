@@ -70,6 +70,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float LabelHeight = 28;
     private const float LabelSpacing = 0;
     private const float Padding = 12;
+    // Uniform inner padding for the floating Performance view (content inside the panel, not the window safe area)
+    private const float PerfInnerPadding = 10f;
 
     private float safeTop, safeBottom, safeLeft, safeRight;
 
@@ -233,8 +235,15 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 // Floating perf view uses absolute position including safe insets (no extra offset here)
                 var perfViewHeight = CalculatePerformanceViewHeight();
-                contentRect = new RectF(performanceXpos + ContentPadding, performanceYpos, 220 - (ContentPadding * 2), perfViewHeight);
                 _panelRect = new RectF(performanceXpos, performanceYpos, 220, perfViewHeight);
+
+                // Deflate panel area by a uniform inner padding and account for header height on top
+                var headerHeight = 50f;
+                contentRect = new RectF(
+                    _panelRect.X + PerfInnerPadding,
+                    _panelRect.Y + headerHeight + PerfInnerPadding,
+                    _panelRect.Width - (2 * PerfInnerPadding),
+                    _panelRect.Height - headerHeight - (2 * PerfInnerPadding));
             }
 
             // Draw panel background
@@ -713,7 +722,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
 
         var headerText = "📊 Metrics";
-        canvas.DrawString(headerText, _headerRect, HorizontalAlignment.Left, VerticalAlignment.Center);
+        // Align header text with content using the same inner padding used for the items
+        var headerTextRect = new RectF(
+            _headerRect.X + PerfInnerPadding,
+            _headerRect.Y,
+            _headerRect.Width - (2 * PerfInnerPadding),
+            _headerRect.Height);
+        canvas.DrawString(headerText, headerTextRect, HorizontalAlignment.Left, VerticalAlignment.Center);
 
 
 
@@ -722,7 +737,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private void DrawPerformancesItems(ICanvas canvas, RectF contentRect)
     {
-        var buttonY = _headerRect.Bottom + LabelSpacing;
+        // Start inside the content rectangle; top/left/right/bottom already include padding
+        var buttonY = contentRect.Y;
+        var contentLeft = contentRect.X;
         var buttonWidth = contentRect.Width;
 
         var buttonRect = RectF.Zero;
@@ -732,28 +749,28 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             // FPS
             textColor = CalculateColorFromPerformanceVale(_emaFps, 50, 30);
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor, textColor);
 
             if (!_isPerformanceMinimized)
             {
                 textColor = CalculateColorFromPerformanceVale(_emaFrameTime, 17, 33, true);
                 buttonY += LabelHeight + LabelSpacing;
-                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
                 DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
             }
 
             //Hitch
             textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
 
             if (!_isPerformanceMinimized)
             {
                 textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
                 buttonY += LabelHeight + LabelSpacing;
-                buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
                 DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
             }
         }
@@ -762,11 +779,11 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             textColor = CalculateColorFromPerformanceVale(_allocPerSec, 5, 10, true);
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor, textColor);
 
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
         }
 
@@ -774,7 +791,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             textColor = CalculateColorFromPerformanceVale(_memoryUsage, 260, 400, true);
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor, textColor);
         }
 
@@ -783,14 +800,14 @@ public class DebugOverlayPanel : IWindowOverlayElement
             textColor = (_threadCount < 50 && _cpuUsage < 30) ? _textColor :
                         (_threadCount < 100 && _cpuUsage < 60) ? Colors.Goldenrod : Colors.Red;
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor, textColor);
         }
 
         if (!_isPerformanceMinimized && _debugRibbonOptions.ShowBatteryUsage)
         {
             buttonY += LabelHeight + LabelSpacing;
-            buttonRect = new RectF(contentRect.X, buttonY, buttonWidth, LabelHeight);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
             textColor = _textColor;
 
             var textToShow = $"🔋 Batt. Cons.: ";
@@ -961,7 +978,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
 
         int headerHeight = 50;
-        return headerHeight + lines * (LabelHeight + LabelSpacing);
+        // Include uniform top/bottom inner padding for the items area
+        return headerHeight + (2 * PerfInnerPadding) + lines * (LabelHeight + LabelSpacing);
     }
 
     private Color CalculateColorFromPerformanceVale(double value, double okValue, double middleValue, bool isLower = false)
