@@ -4,12 +4,156 @@
              x:Class="Plugin.Maui.DebugOverlay.Sample.MainPage"
              Title="Debug Overlay Plugin">
 
-    <!-- Add something that makes sense for your plugin here -->
-
     <ContentPage.Content>
-        <VerticalStackLayout>
-            <Button Text="button Demo" />
-            <Label Text="Demo label" />
-        </VerticalStackLayout>
+        <ScrollView>
+            <VerticalStackLayout Padding="16"
+                    Spacing="16">
+                <Label Text="Stress the app to see overlay changes"
+                        FontSize="18"/>
+
+                <!-- Memory Load -->
+                <Border Stroke="Gray"
+                        StrokeShape="RoundRectangle 8"
+                        Padding="12">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Memory Load"
+                                FontAttributes="Bold"/>
+                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                RowDefinitions="Auto,Auto"
+                                ColumnSpacing="8"
+                                RowSpacing="8">
+                            <Label Grid.Row="0"
+                                    Grid.Column="0"
+                                    VerticalTextAlignment="Center"
+                                    Text="Chunk (MB)"/>
+                            <Slider x:Name="MemChunkSlider"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    Minimum="1"
+                                    Maximum="64"
+                                    Value="8"/>
+                            <Label Grid.Row="0"
+                                    Grid.Column="2"
+                                    VerticalTextAlignment="Center"
+                                    Text="{Binding Source={x:Reference MemChunkSlider}, Path=Value, StringFormat='{0:F0} MB'}"/>
+
+                            <Label Grid.Row="1"
+                                    Grid.Column="0"
+                                    VerticalTextAlignment="Center"
+                                    Text="Allocated"/>
+                            <Label x:Name="AllocatedLabel"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    Grid.ColumnSpan="2"
+                                    VerticalTextAlignment="Center"
+                                    Text="0 MB"/>
+                        </Grid>
+                        <HorizontalStackLayout Spacing="8">
+                            <Button x:Name="StartMemoryBtn"
+                                    Text="Start"
+                                    Clicked="OnStartMemoryClicked"/>
+                            <Button x:Name="StopMemoryBtn"
+                                    Text="Stop"
+                                    Clicked="OnStopMemoryClicked"
+                                    IsEnabled="False"/>
+                            <Button Text="Free"
+                                    Clicked="OnFreeMemoryClicked"/>
+                            <Button Text="GC Collect"
+                                    Clicked="OnGcCollectClicked"/>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- CPU Load -->
+                <Border Stroke="Gray"
+                        StrokeShape="RoundRectangle 8"
+                        Padding="12">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="CPU Load"
+                                FontAttributes="Bold"/>
+                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                RowDefinitions="Auto"
+                                ColumnSpacing="8"
+                                RowSpacing="8">
+                            <Label Grid.Row="0"
+                                    Grid.Column="0"
+                                    VerticalTextAlignment="Center"
+                                    Text="Workers"/>
+                            <Slider x:Name="CpuWorkersSlider"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    Minimum="1"
+                                    Maximum="8"
+                                    Value="2"/>
+                            <Label Grid.Row="0"
+                                    Grid.Column="2"
+                                    VerticalTextAlignment="Center"
+                                    Text="{Binding Source={x:Reference CpuWorkersSlider}, Path=Value, StringFormat='{0:F0}'}"/>
+                        </Grid>
+                        <HorizontalStackLayout Spacing="8">
+                            <Button x:Name="StartCpuBtn"
+                                    Text="Start"
+                                    Clicked="OnStartCpuClicked"/>
+                            <Button x:Name="StopCpuBtn"
+                                    Text="Stop"
+                                    Clicked="OnStopCpuClicked"
+                                    IsEnabled="False"/>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Rendering/Animation Load -->
+                <Border Stroke="Gray"
+                        StrokeShape="RoundRectangle 8"
+                        Padding="12">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Rendering Load (Animations)"
+                                FontAttributes="Bold"/>
+                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                RowDefinitions="Auto"
+                                ColumnSpacing="8"
+                                RowSpacing="8">
+                            <Label Grid.Row="0"
+                                    Grid.Column="0"
+                                    VerticalTextAlignment="Center"
+                                    Text="Boxes"/>
+                            <Slider x:Name="BoxesCountSlider"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    Minimum="5"
+                                    Maximum="200"
+                                    Value="50"/>
+                            <Label Grid.Row="0"
+                                    Grid.Column="2"
+                                    VerticalTextAlignment="Center"
+                                    Text="{Binding Source={x:Reference BoxesCountSlider}, Path=Value, StringFormat='{0:F0}'}"/>
+                        </Grid>
+                        <HorizontalStackLayout Spacing="8">
+                            <Button x:Name="StartAnimBtn"
+                                    Text="Start"
+                                    Clicked="OnStartAnimClicked"/>
+                            <Button x:Name="StopAnimBtn"
+                                    Text="Stop"
+                                    Clicked="OnStopAnimClicked"
+                                    IsEnabled="False"/>
+                        </HorizontalStackLayout>
+                        <Grid>
+                            <Border Stroke="LightGray"
+                                    StrokeShape="RoundRectangle 8"
+                                    Padding="0">
+                                <Grid HeightRequest="240">
+                                    <AbsoluteLayout x:Name="BoxesHost"
+                                            BackgroundColor="#101010"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Label Text="Tip: Start animations to stress FPS; start CPU and memory to see other ribbon metrics move."
+                        FontSize="12"
+                        TextColor="Gray"/>
+            </VerticalStackLayout>
+        </ScrollView>
     </ContentPage.Content>
 </ContentPage>

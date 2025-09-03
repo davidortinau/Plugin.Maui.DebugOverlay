@@ -92,7 +92,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color panelBackgroundColor = null)
+    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color? panelBackgroundColor = null)
     {
         _debugRibbonOptions = debugRibbonOptions;
         _overlay = overlay;
@@ -124,8 +124,28 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     public bool Contains(Point point)
     {
-        // When panel is visible, consume ALL touches to prevent pass-through
-        return _isVisible;
+        if (!_isVisible)
+            return false;
+
+        // Selective hit-testing based on current state
+        switch (_currentState)
+        {
+            case PanelState.MainMenu:
+            case PanelState.TreeView:
+                // Block input within the panel area
+                return _panelRect.Contains(point);
+
+            case PanelState.PerformancesView:
+                // Intercept only header and header buttons; allow list area to pass through
+                if (_backButtonRect.Contains(point) || _minimizeButtonRect.Contains(point) || _moveButtonRect.Contains(point))
+                    return true;
+                if (_headerRect.Contains(point))
+                    return true; // header is the grab zone
+                return false;
+
+            default:
+                return _panelRect.Contains(point);
+        }
     }
 
     private (float top, float bottom, float left, float right) GetSafeAreaInsets()
@@ -141,13 +161,42 @@ public class DebugOverlayPanel : IWindowOverlayElement
 #if IOS
         try
         {
-            // Get actual safe area from iOS
-            if (UIKit.UIApplication.SharedApplication?.KeyWindow?.SafeAreaInsets is { } insets)
+            // Get actual safe area from iOS using scene-aware window retrieval
+            var app = UIKit.UIApplication.SharedApplication;
+            if (app != null)
             {
-                top = (float)insets.Top;
-                bottom = (float)insets.Bottom;
-                left = (float)insets.Left;
-                right = (float)insets.Right;
+                UIKit.UIWindow? window = null;
+                if (app.ConnectedScenes != null)
+                {
+                    foreach (var scene in app.ConnectedScenes)
+                    {
+                        if (scene is UIKit.UIWindowScene ws)
+                        {
+                            foreach (var w in ws.Windows)
+                            {
+                                if (w.IsKeyWindow)
+                                {
+                                    window = w;
+                                    break;
+                                }
+                            }
+                            if (window != null)
+                                break;
+                        }
+                    }
+                }
+
+                // Fallback for single-scene apps
+                window ??= app.Delegate?.Window;
+
+                if (window != null)
+                {
+                    var insets = window.SafeAreaInsets;
+                    top = (float)insets.Top;
+                    bottom = (float)insets.Bottom;
+                    left = (float)insets.Left;
+                    right = (float)insets.Right;
+                }
             }
         }
         catch
@@ -170,8 +219,6 @@ public class DebugOverlayPanel : IWindowOverlayElement
             dirtyRectWidth = dirtyRect.Width;
             dirtyRectHeight = dirtyRect.Height;
 
-
-
             // Panel background: edge-to-edge (full window)
             _panelRect = new RectF(0, 0, dirtyRect.Width, dirtyRect.Height);
 
@@ -184,13 +231,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             if (_currentState == PanelState.PerformancesView)
             {
-                //recalc contentRect
+                // Floating perf view uses absolute position including safe insets (no extra offset here)
                 var perfViewHeight = CalculatePerformanceViewHeight();
-                contentRect = new RectF(performanceXpos + ContentPadding, performanceYpos + safeTop, 220 - (ContentPadding * 2), perfViewHeight);
-                _panelRect = new RectF(performanceXpos, performanceYpos + safeTop, 220, perfViewHeight);
+                contentRect = new RectF(performanceXpos + ContentPadding, performanceYpos, 220 - (ContentPadding * 2), perfViewHeight);
+                _panelRect = new RectF(performanceXpos, performanceYpos, 220, perfViewHeight);
             }
 
-            // Draw panel background => edge-to-edge  if !TreeView
+            // Draw panel background
             DrawPanelBackground(canvas, _panelRect);
 
             if (_currentState == PanelState.MainMenu)
@@ -210,7 +257,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             }
             else if (_currentState == PanelState.PerformancesView)
             {
-                //draw items
+                // Draw performance panel
                 DrawPerformancesViewHeader(canvas, _panelRect);
                 DrawPerformancesHeaderButtons(canvas, _panelRect);
                 DrawPerformancesItems(canvas, contentRect);
@@ -308,15 +355,14 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
-    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor, Color textColor = null)
+    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor, Color? textColor = null)
     {
         canvas.SaveState();
 
-        if (textColor == null)
-            textColor = _textColor;
+        var effectiveTextColor = textColor ?? _textColor;
 
         // Label text
-        canvas.FontColor = textColor;
+        canvas.FontColor = effectiveTextColor;
         canvas.FontSize = 12;
         canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
         canvas.DrawString(text, rect, HorizontalAlignment.Left, VerticalAlignment.Center);
@@ -974,22 +1020,44 @@ public class DebugOverlayPanel : IWindowOverlayElement
             switch (e.Status)
             {
                 case GlobalPanGesture.GestureStatus.Started:
-                    if (_panelRect.Contains(new Point(e.X, e.Y)))
+                    var startPoint = new Point(e.X, e.Y);
+                    // Start dragging only if the gesture begins within the header (excluding header buttons)
+                    if (_headerRect.Contains(startPoint)
+                        && !_backButtonRect.Contains(startPoint)
+                        && !_minimizeButtonRect.Contains(startPoint)
+                        && !_moveButtonRect.Contains(startPoint))
                     {
                         _isMovingPerformance = true;
                         performanceStartedYpos = performanceYpos;
                         performanceStartedXpos = performanceXpos;
                     }
+                    else
+                    {
+                        _isMovingPerformance = false;
+                    }
                     break;
 
                 case GlobalPanGesture.GestureStatus.Completed:
+                    // Stop dragging on release and keep current position (no snap)
                     _isMovingPerformance = false;
+                    _overlay.Invalidate();
                     break;
             }
             if (_isMovingPerformance)
             {
-                performanceXpos = performanceStartedXpos + (float)e.TotalX;
-                performanceYpos = performanceStartedYpos + (float)e.TotalY;
+                var newX = performanceStartedXpos + (float)e.TotalX;
+                var newY = performanceStartedYpos + (float)e.TotalY;
+
+                // Clamp within full window bounds (allow free placement; margins only apply to preset corner positions)
+                var perfWidth = 220f;
+                var perfHeight = CalculatePerformanceViewHeight();
+                var minX = 0f;
+                var minY = 0f;
+                var maxX = Math.Max(minX, dirtyRectWidth - perfWidth);
+                var maxY = Math.Max(minY, dirtyRectHeight - perfHeight);
+
+                performanceXpos = Math.Clamp(newX, minX, maxX);
+                performanceYpos = Math.Clamp(newY, minY, maxY);
                 _overlay.Invalidate();
             }
         }
@@ -1136,6 +1204,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         if (_backButtonRect.Contains(point))
         {
             _currentState = PanelState.MainMenu;
+            // Back to menu: block underlying UI again
+            _overlay.DisableUITouchEventPassthrough = true;
             _currentTreeData = null;
             _scrollOffset = 0;
             _isScrolling = false; // Reset scroll state
@@ -1148,27 +1218,39 @@ public class DebugOverlayPanel : IWindowOverlayElement
         if (_moveButtonRect.Contains(point))
         {
             _performanceViewPosState++;
+
+            var perfWidth = _panelRect.Width > 0 ? _panelRect.Width : 220f;
+            var perfHeight = _panelRect.Height > 0 ? _panelRect.Height : CalculatePerformanceViewHeight();
+
+            var leftX = safeLeft;
+            var topY = safeTop;
+            // Symmetric margins relative to safe areas
+            var rightX = dirtyRectWidth - safeRight - perfWidth - safeLeft;
+            var bottomY = dirtyRectHeight - safeBottom - perfHeight - safeTop;
+            rightX = Math.Max(leftX, rightX);
+            bottomY = Math.Max(topY, bottomY);
+
             switch (_performanceViewPosState % 4)
             {
                 case 0:
-                    performanceXpos = 0;
-                    performanceYpos = safeTop;
+                    performanceXpos = leftX;
+                    performanceYpos = topY;
                     break;
                 case 1:
-                    performanceXpos = dirtyRectWidth - _panelRect.Width;
-                    performanceYpos = safeTop;
+                    performanceXpos = rightX;
+                    performanceYpos = topY;
                     break;
                 case 2:
-                    performanceXpos = dirtyRectWidth - _panelRect.Width;
-                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom;
+                    performanceXpos = rightX;
+                    performanceYpos = bottomY;
                     break;
                 case 3:
-                    performanceXpos = 0;
-                    performanceYpos = dirtyRectHeight - _panelRect.Height - safeBottom;
+                    performanceXpos = leftX;
+                    performanceYpos = bottomY;
                     break;
                 default:
-                    performanceXpos = 0;
-                    performanceYpos = safeTop;
+                    performanceXpos = leftX;
+                    performanceYpos = topY;
                     break;
             }
             _overlay.Invalidate();
@@ -1183,7 +1265,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _overlay.Invalidate();
             return true;
         }
-        return true;
+        // Header consumes taps (draggable area)
+        if (_headerRect.Contains(point))
+            return true;
+
+        // Allow pass-through for metrics list area
+        return false;
     }
 
     private void HandleTreeNodeTap(Point point)
@@ -1304,7 +1391,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Show();
     }
 
-    private async Task ShowVisualTreeView()
+    private Task ShowVisualTreeView()
     {
         try
         {
@@ -1321,6 +1408,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                // Tree view should block underlying UI
+                _overlay.DisableUITouchEventPassthrough = true;
                 _currentState = PanelState.TreeView;
                 _overlay.Invalidate();
             });
@@ -1329,6 +1418,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             Debug.WriteLine($"Error showing visual tree view: {ex.Message}");
         }
+        return Task.CompletedTask;
     }
 
     private async Task ShowShellHierarchyView()
@@ -1365,6 +1455,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     Debug.WriteLine($"=== SHELL HIERARCHY: Parsed {_currentTreeData?.Count ?? 0} root nodes ===");
 
                     Debug.WriteLine("=== SHELL HIERARCHY: Navigating to TreeView state ===");
+                    // Tree view should block underlying UI
+                    _overlay.DisableUITouchEventPassthrough = true;
                     _currentState = PanelState.TreeView;
                     _overlay.Invalidate();
                     Debug.WriteLine("=== SHELL HIERARCHY: Navigation complete ===");
@@ -1383,7 +1475,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
     }
 
-    private async Task ShowPerformancesView()
+    private Task ShowPerformancesView()
     {
         try
         {
@@ -1391,6 +1483,18 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 _isPerformanceMinimized = false;
                 _currentState = PanelState.PerformancesView;
+                // Allow pass-through except header/buttons in PerformancesView
+                _overlay.DisableUITouchEventPassthrough = false;
+                // Initialize default position within safe area if not set
+                if (performanceXpos == 0 && performanceYpos == 0)
+                {
+                    var perfWidth = 220f;
+                    var perfHeight = CalculatePerformanceViewHeight();
+                    var maxX = Math.Max(safeLeft, dirtyRectWidth - safeRight - perfWidth);
+                    var maxY = Math.Max(safeTop, dirtyRectHeight - safeBottom - perfHeight);
+                    performanceXpos = Math.Clamp(safeLeft, safeLeft, maxX);
+                    performanceYpos = Math.Clamp(safeTop, safeTop, maxY);
+                }
                 _overlay.Invalidate();
             });
         }
@@ -1399,6 +1503,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Debug.WriteLine($"=== SHELL HIERARCHY ERROR (Async): {ex.Message} ===");
             Debug.WriteLine($"=== SHELL HIERARCHY STACK TRACE (Async): {ex.StackTrace} ===");
         }
+        return Task.CompletedTask;
     }
 
     private List<TreeNode> ParseVisualTreeDump(string dump)
@@ -1637,12 +1742,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
     }
 
-     
+
     #region Performances
 
     #region variables
 
-    private readonly FpsService _fpsService;
+    private readonly FpsService _fpsService = new FpsService();
 
     private double _overallScore;
     private double _cpuUsage;
@@ -1715,7 +1820,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private void StartMetrics()
     {
         _stopwatch.Restart();
-        _prevCpuTime = _currentProcess.TotalProcessorTime;
+#if !IOS && !MACCATALYST
+    _prevCpuTime = _currentProcess.TotalProcessorTime;
+#endif
 
         Microsoft.Maui.Controls.Application.Current!.Dispatcher.StartTimer(TimeSpan.FromSeconds(1), () =>
         {
@@ -1726,6 +1833,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             if (_debugRibbonOptions.ShowCPU_Usage)
             {
+#if !IOS && !MACCATALYST
                 _memoryUsage = _currentProcess.WorkingSet64 / (1024 * 1024);
                 _threadCount = _currentProcess.Threads.Count;
 
@@ -1736,6 +1844,11 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 _cpuUsage = (cpuDelta / interval) * 100 / _processorCount;
 
                 _prevCpuTime = currentCpuTime;
+#else
+                _memoryUsage = 0;
+                _threadCount = 0;
+                _cpuUsage = 0;
+#endif
             }
             _stopwatch.Restart();
 
@@ -1857,8 +1970,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _batteryMilliWAvailable = false;
         }
 #else
-            _batteryMilliW = 0;
-            _batteryMilliWAvailable = false;
+        _batteryMilliW = 0;
+        _batteryMilliWAvailable = false;
 #endif
     }
 
