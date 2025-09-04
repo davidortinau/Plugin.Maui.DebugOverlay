@@ -763,7 +763,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
                 buttonY += LabelHeight + LabelSpacing;
                 buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
-                DrawLabel(canvas, buttonRect, $"⏱️ Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
+                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
             }
              
             //Hitch
