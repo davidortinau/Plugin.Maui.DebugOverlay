@@ -758,13 +758,19 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 buttonY += LabelHeight + LabelSpacing;
                 buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
                 DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
-            }
 
+
+                textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"⏱️ Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
+            }
+             
             //Hitch
-            textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
+            textColor = CalculateColorFromPerformanceVale(_emaLastHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
             buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
-            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
+            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaLastHitch:F0} ms", _buttonBackgroundColor, textColor);
 
             if (!_isPerformanceMinimized)
             {
@@ -969,7 +975,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         if (!_isPerformanceMinimized)
         {
-            if (_debugRibbonOptions.ShowFrame) lines += 2;
+            if (_debugRibbonOptions.ShowFrame) lines += 3;
             if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
             if (_debugRibbonOptions.ShowMemory) lines += 1;
             if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
@@ -1789,6 +1795,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const double HitchThresholdMs = 200;
     private double _emaHitch = 0;
     private double _emaHighestHitch = 0;
+    private double _emaLastHitch = 0;
     private const double _emaHitchAlpha = 0.7; // more reactive than FPS/FrameTime
 
 
@@ -1839,7 +1846,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
     {
         _stopwatch.Restart();
 #if !IOS && !MACCATALYST
-    _prevCpuTime = _currentProcess.TotalProcessorTime;
+        _prevCpuTime = _currentProcess.TotalProcessorTime;
 #endif
 
         Microsoft.Maui.Controls.Application.Current!.Dispatcher.StartTimer(TimeSpan.FromSeconds(1), () =>
@@ -1886,7 +1893,6 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     private void StopMonitoringPerformances()
     {
-        _fpsService?.Stop();
         _stopRequested = true;
     }
 
@@ -1914,6 +1920,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _emaHitch = hitchValue;
         else
             _emaHitch = (_emaHitchAlpha * _emaHitch) + ((1 - _emaHitchAlpha) * hitchValue);
+
+        if (_emaHitch > HitchThresholdMs)
+            _emaLastHitch = _emaHitch;
 
         if (_emaHitch > _emaHighestHitch)
             _emaHighestHitch = _emaHitch;
