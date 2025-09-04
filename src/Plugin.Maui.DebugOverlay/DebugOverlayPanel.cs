@@ -1,6 +1,7 @@
+using Microsoft.Maui.Graphics.Text;
+using Plugin.Maui.DebugOverlay.Platforms;
 using System.Diagnostics;
 using System.Reflection;
-using Microsoft.Maui.Graphics;
 
 namespace Plugin.Maui.DebugOverlay;
 
@@ -20,6 +21,7 @@ public class TreeNode
 /// </summary>
 public class DebugOverlayPanel : IWindowOverlayElement
 {
+    protected DebugRibbonOptions _debugRibbonOptions;
     private readonly DebugOverlay _overlay;
     private readonly VisualTreeDumpService _dumpService;
     private readonly Color _panelBackgroundColor;
@@ -27,7 +29,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private readonly Color _textColor;
 
     // Panel state management
-    private enum PanelState { MainMenu, TreeView }
+    private enum PanelState { MainMenu, TreeView, PerformancesView }
     private PanelState _currentState = PanelState.MainMenu;
     private List<TreeNode>? _currentTreeData = null;
 
@@ -35,8 +37,11 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private RectF _closeButtonRect;
     private RectF _visualTreeButtonRect;
     private RectF _shellHierarchyButtonRect;
+    private RectF _performancesViewButtonRect;
     private RectF _headerRect;
     private RectF _backButtonRect;
+    private RectF _minimizeButtonRect;
+    private RectF _moveButtonRect;
     private RectF _scrollUpButtonRect;
     private RectF _scrollDownButtonRect;
     private RectF _exportButtonRect;
@@ -62,7 +67,26 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private const float ContentPadding = 15; // Padding for content inside panel
     private const float ButtonHeight = 36;
     private const float ButtonSpacing = 8;
+    private const float LabelHeight = 28;
+    private const float LabelSpacing = 0;
     private const float Padding = 12;
+    // Uniform inner padding for the floating Performance view (content inside the panel, not the window safe area)
+    private const float PerfInnerPadding = 10f;
+
+    private float safeTop, safeBottom, safeLeft, safeRight;
+
+    private bool _isMovingPerformance = false;
+    private bool _isPerformanceMinimized = false;
+    private float performanceStartedXpos = 0;
+    private float performanceStartedYpos = 0;
+
+    private float performanceXpos = 0;
+    private float performanceYpos = 0;
+
+    private float dirtyRectWidth = 0;
+    private float dirtyRectHeight = 0;
+    private int _performanceViewPosState = 0;
+
 
     public bool IsVisible
     {
@@ -70,9 +94,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(DebugOverlay overlay, Color panelBackgroundColor = null)
+    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color? panelBackgroundColor = null)
     {
-
+        _debugRibbonOptions = debugRibbonOptions;
         _overlay = overlay;
 
         _dumpService = new VisualTreeDumpService();
@@ -84,16 +108,52 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Get MAUI version
         var version = typeof(MauiApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         _mauiVersion = version != null && version.Contains('+') ? version[..version.IndexOf('+')] : version ?? "Unknown";
+
+        // Performances
+        _stopwatch = new Stopwatch();
+
+        _fpsService = new FpsService();
+        _fpsService.OnFrameTimeCalculated += FpsService_OnFrameTimeCalculated;
+        _fpsService?.Start();
+
+        // Get safe area insets
+        var safe = GetSafeAreaInsets();
+        safeTop = safe.top;
+        safeBottom = safe.bottom;
+        safeLeft = safe.left;
+        safeRight = safe.right;
     }
 
     public bool Contains(Point point)
     {
-        // When panel is visible, consume ALL touches to prevent pass-through
-        return _isVisible;
+        if (!_isVisible)
+            return false;
+
+        // Selective hit-testing based on current state
+        switch (_currentState)
+        {
+            case PanelState.MainMenu:
+            case PanelState.TreeView:
+                // Block input within the panel area
+                return _panelRect.Contains(point);
+
+            case PanelState.PerformancesView:
+                // Intercept only header and header buttons; allow list area to pass through
+                if (_backButtonRect.Contains(point) || _minimizeButtonRect.Contains(point) || _moveButtonRect.Contains(point))
+                    return true;
+                if (_headerRect.Contains(point))
+                    return true; // header is the grab zone
+                return false;
+
+            default:
+                return _panelRect.Contains(point);
+        }
     }
 
-    private (float top, float bottom, float left, float right) GetSafeAreaInsets(RectF windowRect)
+    private (float top, float bottom, float left, float right) GetSafeAreaInsets()
     {
+        //TODO Need refactor because useless multiple calls. You can store value and update values from public override void HandleUIChange()
+
         // Default safe area insets
         float top = 50f;    // Status bar + notch area
         float bottom = 34f; // Home indicator area  
@@ -103,13 +163,42 @@ public class DebugOverlayPanel : IWindowOverlayElement
 #if IOS
         try
         {
-            // Get actual safe area from iOS
-            if (UIKit.UIApplication.SharedApplication?.KeyWindow?.SafeAreaInsets is { } insets)
+            // Get actual safe area from iOS using scene-aware window retrieval
+            var app = UIKit.UIApplication.SharedApplication;
+            if (app != null)
             {
-                top = (float)insets.Top;
-                bottom = (float)insets.Bottom;
-                left = (float)insets.Left;
-                right = (float)insets.Right;
+                UIKit.UIWindow? window = null;
+                if (app.ConnectedScenes != null)
+                {
+                    foreach (var scene in app.ConnectedScenes)
+                    {
+                        if (scene is UIKit.UIWindowScene ws)
+                        {
+                            foreach (var w in ws.Windows)
+                            {
+                                if (w.IsKeyWindow)
+                                {
+                                    window = w;
+                                    break;
+                                }
+                            }
+                            if (window != null)
+                                break;
+                        }
+                    }
+                }
+
+                // Fallback for single-scene apps
+                window ??= app.Delegate?.Window;
+
+                if (window != null)
+                {
+                    var insets = window.SafeAreaInsets;
+                    top = (float)insets.Top;
+                    bottom = (float)insets.Bottom;
+                    left = (float)insets.Left;
+                    right = (float)insets.Right;
+                }
             }
         }
         catch
@@ -117,20 +206,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             // Fall back to defaults
         }
 #elif ANDROID
-        try
-        {
-            // Basic Android status bar height detection
-            var context = Platform.CurrentActivity ?? Android.App.Application.Context;
-            var resourceId = context.Resources?.GetIdentifier("status_bar_height", "dimen", "android");
-            if (resourceId.HasValue && resourceId > 0 && context.Resources != null)
-            {
-                top = context.Resources.GetDimensionPixelSize(resourceId.Value) / context.Resources.DisplayMetrics.Density;
-            }
-        }
-        catch
-        {
-            // Fall back to defaults
-        }
+        top = SafeAreaService.GetTopSafeAreaInset();
 #endif
 
         return (top, bottom, left, right);
@@ -142,8 +218,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         try
         {
-            // Get safe area insets
-            var (safeTop, safeBottom, safeLeft, safeRight) = GetSafeAreaInsets(dirtyRect);
+            dirtyRectWidth = dirtyRect.Width;
+            dirtyRectHeight = dirtyRect.Height;
 
             // Panel background: edge-to-edge (full window)
             _panelRect = new RectF(0, 0, dirtyRect.Width, dirtyRect.Height);
@@ -155,7 +231,22 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 dirtyRect.Width - safeLeft - safeRight - (ContentPadding * 2),
                 dirtyRect.Height - safeTop - safeBottom - (ContentPadding * 2));
 
-            // Draw edge-to-edge panel background
+            if (_currentState == PanelState.PerformancesView)
+            {
+                // Floating perf view uses absolute position including safe insets (no extra offset here)
+                var perfViewHeight = CalculatePerformanceViewHeight();
+                _panelRect = new RectF(performanceXpos, performanceYpos, 220, perfViewHeight);
+
+                // Deflate panel area by a uniform inner padding and account for header height on top
+                var headerHeight = 50f;
+                contentRect = new RectF(
+                    _panelRect.X + PerfInnerPadding,
+                    _panelRect.Y + headerHeight + PerfInnerPadding,
+                    _panelRect.Width - (2 * PerfInnerPadding),
+                    _panelRect.Height - headerHeight - (2 * PerfInnerPadding));
+            }
+
+            // Draw panel background
             DrawPanelBackground(canvas, _panelRect);
 
             if (_currentState == PanelState.MainMenu)
@@ -172,6 +263,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 DrawTreeView(canvas, contentRect);
                 DrawBackButton(canvas, contentRect);
                 DrawScrollButtons(canvas, contentRect);
+            }
+            else if (_currentState == PanelState.PerformancesView)
+            {
+                // Draw performance panel
+                DrawPerformancesViewHeader(canvas, _panelRect);
+                DrawPerformancesHeaderButtons(canvas, _panelRect);
+                DrawPerformancesItems(canvas, contentRect);
             }
         }
         catch (Exception ex)
@@ -236,6 +334,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
         buttonY += ButtonHeight + ButtonSpacing;
         _shellHierarchyButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
         DrawButton(canvas, _shellHierarchyButtonRect, "🐚 View Shell Hierarchy", _buttonBackgroundColor);
+
+        // Shell Hierarchy Button
+        buttonY += ButtonHeight + ButtonSpacing;
+        _performancesViewButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
+        DrawButton(canvas, _performancesViewButtonRect, "📊 View Performances", _buttonBackgroundColor);
+
     }
 
     private void DrawButton(ICanvas canvas, RectF rect, string text, Color backgroundColor)
@@ -260,6 +364,21 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
+    private void DrawLabel(ICanvas canvas, RectF rect, string text, Color backgroundColor, Color? textColor = null)
+    {
+        canvas.SaveState();
+
+        var effectiveTextColor = textColor ?? _textColor;
+
+        // Label text
+        canvas.FontColor = effectiveTextColor;
+        canvas.FontSize = 12;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
+        canvas.DrawString(text, rect, HorizontalAlignment.Left, VerticalAlignment.Center);
+
+        canvas.RestoreState();
+    }
+
     private void DrawCloseButton(ICanvas canvas, RectF contentRect)
     {
         var closeButtonSize = 30f;
@@ -267,7 +386,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Center the close button vertically within the header area (header height is 50px)
         var headerHeight = 50f;
         var buttonY = contentRect.Y + (headerHeight - closeButtonSize) / 2;
-        
+
         _closeButtonRect = new RectF(
             contentRect.Right - closeButtonSize - margin,
             buttonY,
@@ -352,7 +471,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Center the back button vertically within the header area (header height is 50px)
         var headerHeight = 50f;
         var buttonY = contentRect.Y + (headerHeight - backButtonSize) / 2;
-        
+
         _backButtonRect = new RectF(
             contentRect.X + margin,
             buttonY,
@@ -585,6 +704,301 @@ public class DebugOverlayPanel : IWindowOverlayElement
         return nextY;
     }
 
+
+    #region Draw Performances Methods
+    private void DrawPerformancesViewHeader(ICanvas canvas, RectF contentRect)
+    {
+        _headerRect = new RectF(contentRect.X, contentRect.Y, contentRect.Width, 50);
+
+        canvas.SaveState();
+
+        // Header background
+        canvas.FillColor = Color.FromArgb("#FF2D2D30");
+        canvas.FillRoundedRectangle(_headerRect, 8);
+
+        // Title text
+        canvas.FontColor = _textColor;
+        canvas.FontSize = 14;
+        canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 600, FontStyleType.Normal);
+
+        var headerText = "📊 Metrics";
+        // Align header text with content using the same inner padding used for the items
+        var headerTextRect = new RectF(
+            _headerRect.X + PerfInnerPadding,
+            _headerRect.Y,
+            _headerRect.Width - (2 * PerfInnerPadding),
+            _headerRect.Height);
+        canvas.DrawString(headerText, headerTextRect, HorizontalAlignment.Left, VerticalAlignment.Center);
+
+
+
+        canvas.RestoreState();
+    }
+
+    private void DrawPerformancesItems(ICanvas canvas, RectF contentRect)
+    {
+        // Start inside the content rectangle; top/left/right/bottom already include padding
+        var buttonY = contentRect.Y;
+        var contentLeft = contentRect.X;
+        var buttonWidth = contentRect.Width;
+
+        var buttonRect = RectF.Zero;
+        Color textColor = Colors.White;
+
+        if (_debugRibbonOptions.ShowFrame)
+        {
+            // FPS
+            textColor = CalculateColorFromPerformanceVale(_emaFps, 50, 30);
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚡ Fps: {_emaFps:F1}", _buttonBackgroundColor, textColor);
+
+            if (!_isPerformanceMinimized)
+            {
+                textColor = CalculateColorFromPerformanceVale(_emaFrameTime, 17, 33, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"⏱ FrameTime: {_emaFrameTime:F1} ms", _buttonBackgroundColor, textColor);
+
+
+                textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
+            }
+             
+            //Hitch
+            textColor = CalculateColorFromPerformanceVale(_emaLastHitch, 200, 400, true);
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚠️ Last Hitch: {_emaLastHitch:F0} ms", _buttonBackgroundColor, textColor);
+
+            if (!_isPerformanceMinimized)
+            {
+                textColor = CalculateColorFromPerformanceVale(_emaHighestHitch, 200, 400, true);
+                buttonY += LabelHeight + LabelSpacing;
+                buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+                DrawLabel(canvas, buttonRect, $"💥 Highest Hitch: {_emaHighestHitch:F0} ms", _buttonBackgroundColor, textColor);
+            }
+        }
+
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowAlloc_GC)
+        {
+            textColor = CalculateColorFromPerformanceVale(_allocPerSec, 5, 10, true);
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"💾 Alloc/sec: {_allocPerSec:F2} MB", _buttonBackgroundColor, textColor);
+
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"♻️ GC: Gen0 {_gc0Delta}, Gen1 {_gc1Delta}, Gen2 {_gc2Delta}", _buttonBackgroundColor);
+        }
+
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowMemory)
+        {
+            textColor = CalculateColorFromPerformanceVale(_memoryUsage, 260, 400, true);
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"🧠 Memory: {_memoryUsage} MB", _buttonBackgroundColor, textColor);
+        }
+
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowCPU_Usage)
+        {
+            textColor = (_threadCount < 50 && _cpuUsage < 30) ? _textColor :
+                        (_threadCount < 100 && _cpuUsage < 60) ? Colors.Goldenrod : Colors.Red;
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            DrawLabel(canvas, buttonRect, $"⚡ CPU: {_cpuUsage:F1}%  🧵 Threads: {_threadCount}", _buttonBackgroundColor, textColor);
+        }
+
+        if (!_isPerformanceMinimized && _debugRibbonOptions.ShowBatteryUsage)
+        {
+            buttonY += LabelHeight + LabelSpacing;
+            buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
+            textColor = _textColor;
+
+            var textToShow = $"🔋 Batt. Cons.: ";
+            if (_batteryMilliWAvailable)
+            {
+                textColor = CalculateColorFromPerformanceVale(_batteryMilliW, 100, 500, true);
+                textToShow += $"{_batteryMilliW:F1} mW";
+            }
+            else
+                textToShow += "N/A";
+
+            DrawLabel(canvas, buttonRect, textToShow, _buttonBackgroundColor);
+        }
+    }
+
+
+    private void DrawPerformancesHeaderButtons(ICanvas canvas, RectF contentRect)
+    {
+        var buttonSize = 26f;
+        var margin = 6f;
+        // Center the back button vertically within the header area (header height is 50px)
+        var headerHeight = 50f;
+        var buttonY = contentRect.Y + (headerHeight - buttonSize) / 2;
+
+        #region back button
+        _backButtonRect = new RectF(
+            contentRect.X + 220 - buttonSize - 2 * margin,
+            buttonY,
+            buttonSize,
+            buttonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_backButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_backButtonRect, 4);
+
+        // Draw X
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+        var centerX = _backButtonRect.Center.X;
+        var centerY = _backButtonRect.Center.Y;
+        var size = 6f;
+
+        canvas.DrawLine(centerX - size, centerY - size, centerX + size, centerY + size);
+        canvas.DrawLine(centerX - size, centerY + size, centerX + size, centerY - size);
+
+
+        canvas.RestoreState();
+        #endregion
+
+        #region minimize button
+        _minimizeButtonRect = new RectF(
+              contentRect.X + 220 - 3 * buttonSize - 6 * margin,
+                buttonY,
+                buttonSize,
+                buttonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_minimizeButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_minimizeButtonRect, 4);
+
+        //   minimize
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+        size = 12;
+
+        if (_isPerformanceMinimized)
+        {
+            centerX = _minimizeButtonRect.Center.X;
+            centerY = _minimizeButtonRect.Center.Y;
+
+            float left = centerX - size / 2;
+            float top = centerY - size / 2;
+
+            canvas.StrokeColor = Colors.White;
+            canvas.StrokeSize = 2;
+            canvas.FillColor = Colors.Transparent;
+
+            canvas.DrawRectangle(left, top, size, size);
+        }
+        else
+        {
+            centerX = _minimizeButtonRect.Center.X;
+            centerY = _minimizeButtonRect.Center.Y + _minimizeButtonRect.Height / 4;
+
+            canvas.DrawLine(centerX - size / 2, centerY, centerX + size / 2, centerY);
+        }
+
+        canvas.RestoreState();
+        #endregion
+
+        #region move button
+        _moveButtonRect = new RectF(
+                contentRect.X + 220 - 2 * buttonSize - 4 * margin,
+                buttonY,
+                buttonSize,
+                buttonSize);
+
+        canvas.SaveState();
+
+        // Back button background
+        canvas.FillColor = Color.FromArgb("#FF4A4A4A");
+        canvas.FillRoundedRectangle(_moveButtonRect, 4);
+
+        // Back button border
+        canvas.StrokeColor = Color.FromArgb("#FF666666");
+        canvas.StrokeSize = 1;
+        canvas.DrawRoundedRectangle(_moveButtonRect, 4);
+
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+
+        centerX = _moveButtonRect.Center.X;
+        centerY = _moveButtonRect.Center.Y;
+        size = 8;
+        float arrowSize = 3;
+
+        // horizontal line
+        canvas.DrawLine(centerX - size, centerY, centerX + size, centerY);
+
+        // arrows at the ends of the horizontal line
+        canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY - arrowSize);
+        canvas.DrawLine(centerX - size, centerY, centerX - size + arrowSize, centerY + arrowSize);
+
+        canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY - arrowSize);
+        canvas.DrawLine(centerX + size, centerY, centerX + size - arrowSize, centerY + arrowSize);
+
+        // vertical line
+        canvas.DrawLine(centerX, centerY - size, centerX, centerY + size);
+
+        // arrows at the ends of the vertical line  
+        canvas.DrawLine(centerX, centerY - size, centerX - arrowSize, centerY - size + arrowSize);
+        canvas.DrawLine(centerX, centerY - size, centerX + arrowSize, centerY - size + arrowSize);
+
+        canvas.DrawLine(centerX, centerY + size, centerX - arrowSize, centerY + size - arrowSize);
+        canvas.DrawLine(centerX, centerY + size, centerX + arrowSize, centerY + size - arrowSize);
+
+
+        canvas.RestoreState();
+        #endregion
+    }
+
+    private float CalculatePerformanceViewHeight()
+    {
+        int lines = 2;
+
+        if (!_isPerformanceMinimized)
+        {
+            if (_debugRibbonOptions.ShowFrame) lines += 3;
+            if (_debugRibbonOptions.ShowAlloc_GC) lines += 2;
+            if (_debugRibbonOptions.ShowMemory) lines += 1;
+            if (_debugRibbonOptions.ShowCPU_Usage) lines += 1;
+            if (_debugRibbonOptions.ShowBatteryUsage) lines += 1;
+        }
+
+
+        int headerHeight = 50;
+        // Include uniform top/bottom inner padding for the items area
+        return headerHeight + (2 * PerfInnerPadding) + lines * (LabelHeight + LabelSpacing);
+    }
+
+    private Color CalculateColorFromPerformanceVale(double value, double okValue, double middleValue, bool isLower = false)
+    {
+        if (isLower)
+            return value <= okValue ? _textColor :
+                   value <= middleValue ? Colors.Goldenrod : Colors.Red;
+        else
+            return value >= okValue ? _textColor :
+                    value >= middleValue ? Colors.Goldenrod : Colors.Red;
+    }
+    #endregion
+
     /// <summary>
     /// Handles tap events on the panel. Returns true if the tap was handled.
     /// </summary>
@@ -606,7 +1020,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 return HandleTreeViewTap(point);
             }
-
+            else if (_currentState == PanelState.PerformancesView)
+            {
+                return HandlePerformancesViewTap(point);
+            }
             // Panel was tapped but no specific element - consume the tap to prevent closing
             return true;
         }
@@ -614,6 +1031,59 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             Debug.WriteLine($"Error handling panel tap: {ex.Message}");
             return true; // Still consume the tap to prevent issues
+        }
+    }
+
+    /// <summary>
+    /// Handles Pan update on window
+    /// </summary>
+    internal void HandlePanUpdate(object s, GlobalPanGesture.PanEventArgs e)
+    {
+        if (_currentState == PanelState.PerformancesView)
+        {
+            switch (e.Status)
+            {
+                case GlobalPanGesture.GestureStatus.Started:
+                    var startPoint = new Point(e.X, e.Y);
+                    // Start dragging only if the gesture begins within the header (excluding header buttons)
+                    if (_headerRect.Contains(startPoint)
+                        && !_backButtonRect.Contains(startPoint)
+                        && !_minimizeButtonRect.Contains(startPoint)
+                        && !_moveButtonRect.Contains(startPoint))
+                    {
+                        _isMovingPerformance = true;
+                        performanceStartedYpos = performanceYpos;
+                        performanceStartedXpos = performanceXpos;
+                    }
+                    else
+                    {
+                        _isMovingPerformance = false;
+                    }
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Completed:
+                    // Stop dragging on release and keep current position (no snap)
+                    _isMovingPerformance = false;
+                    _overlay.Invalidate();
+                    break;
+            }
+            if (_isMovingPerformance)
+            {
+                var newX = performanceStartedXpos + (float)e.TotalX;
+                var newY = performanceStartedYpos + (float)e.TotalY;
+
+                // Clamp within full window bounds (allow free placement; margins only apply to preset corner positions)
+                var perfWidth = 220f;
+                var perfHeight = CalculatePerformanceViewHeight();
+                var minX = 0f;
+                var minY = 0f;
+                var maxX = Math.Max(minX, dirtyRectWidth - perfWidth);
+                var maxY = Math.Max(minY, dirtyRectHeight - perfHeight);
+
+                performanceXpos = Math.Clamp(newX, minX, maxX);
+                performanceYpos = Math.Clamp(newY, minY, maxY);
+                _overlay.Invalidate();
+            }
         }
     }
 
@@ -657,6 +1127,22 @@ public class DebugOverlayPanel : IWindowOverlayElement
             _lastButtonTapTime = currentTime;
             Debug.WriteLine("Shell Hierarchy button tapped - showing tree view");
             _ = Task.Run(async () => await ShowShellHierarchyView());
+            return true;
+        }
+
+        // Check if Performances View button was tapped
+        if (_performancesViewButtonRect.Contains(point))
+        {
+            // Debounce button taps to prevent accidental double execution
+            if (timeSinceLastButtonTap < ButtonTapDebounceMs)
+            {
+                Debug.WriteLine($"Performances View button tap ignored due to debouncing (< {ButtonTapDebounceMs}ms)");
+                return true;
+            }
+
+            _lastButtonTapTime = currentTime;
+            Debug.WriteLine("Performances View button tapped - showing performances view");
+            _ = Task.Run(async () => await ShowPerformancesView());
             return true;
         }
 
@@ -734,6 +1220,81 @@ public class DebugOverlayPanel : IWindowOverlayElement
         HandleTreeNodeTap(point);
 
         return true;
+    }
+
+    private bool HandlePerformancesViewTap(Point point)
+    {
+        // Check if back button was tapped
+        if (_backButtonRect.Contains(point))
+        {
+            _currentState = PanelState.MainMenu;
+            // Back to menu: block underlying UI again
+            _overlay.DisableUITouchEventPassthrough = true;
+            _currentTreeData = null;
+            _scrollOffset = 0;
+            _isScrolling = false; // Reset scroll state
+            _overlay.Invalidate();
+            return true;
+        }
+
+
+        // Check if move was tapped
+        if (_moveButtonRect.Contains(point))
+        {
+            _performanceViewPosState++;
+
+            var perfWidth = _panelRect.Width > 0 ? _panelRect.Width : 220f;
+            var perfHeight = _panelRect.Height > 0 ? _panelRect.Height : CalculatePerformanceViewHeight();
+
+            var leftX = safeLeft;
+            var topY = safeTop;
+            // Symmetric margins relative to safe areas
+            var rightX = dirtyRectWidth - safeRight - perfWidth - safeLeft;
+            var bottomY = dirtyRectHeight - safeBottom - perfHeight - safeTop;
+            rightX = Math.Max(leftX, rightX);
+            bottomY = Math.Max(topY, bottomY);
+
+            switch (_performanceViewPosState % 4)
+            {
+                case 0:
+                    performanceXpos = leftX;
+                    performanceYpos = topY;
+                    break;
+                case 1:
+                    performanceXpos = rightX;
+                    performanceYpos = topY;
+                    break;
+                case 2:
+                    performanceXpos = rightX;
+                    performanceYpos = bottomY;
+                    break;
+                case 3:
+                    performanceXpos = leftX;
+                    performanceYpos = bottomY;
+                    break;
+                default:
+                    performanceXpos = leftX;
+                    performanceYpos = topY;
+                    break;
+            }
+            _overlay.Invalidate();
+            return true;
+        }
+
+
+        // Check if minimize button was tapped
+        if (_minimizeButtonRect.Contains(point))
+        {
+            _isPerformanceMinimized = !_isPerformanceMinimized;
+            _overlay.Invalidate();
+            return true;
+        }
+        // Header consumes taps (draggable area)
+        if (_headerRect.Contains(point))
+            return true;
+
+        // Allow pass-through for metrics list area
+        return false;
     }
 
     private void HandleTreeNodeTap(Point point)
@@ -814,7 +1375,6 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Return the height of the scrollable tree view area
         // This should match the height used in DrawTreeView
         var windowHeight = _panelRect.Height;
-        var (safeTop, safeBottom, _, _) = GetSafeAreaInsets(_panelRect);
         var contentHeight = windowHeight - safeTop - safeBottom - (ContentPadding * 2);
         var headerHeight = 50f; // Tree view header height
 
@@ -830,6 +1390,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _scrollOffset = 0;
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
+
+        StartMonitoringPerformances();
     }
 
     public void Hide()
@@ -841,6 +1403,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         _scrollOffset = 0;
         _isScrolling = false; // Reset scroll state
         _overlay.Invalidate(); // Force redraw
+
+        StopMonitoringPerformances();
     }
 
     public void Toggle()
@@ -851,7 +1415,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Show();
     }
 
-    private async Task ShowVisualTreeView()
+    private Task ShowVisualTreeView()
     {
         try
         {
@@ -868,6 +1432,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             MainThread.BeginInvokeOnMainThread(() =>
             {
+                // Tree view should block underlying UI
+                _overlay.DisableUITouchEventPassthrough = true;
                 _currentState = PanelState.TreeView;
                 _overlay.Invalidate();
             });
@@ -876,6 +1442,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         {
             Debug.WriteLine($"Error showing visual tree view: {ex.Message}");
         }
+        return Task.CompletedTask;
     }
 
     private async Task ShowShellHierarchyView()
@@ -912,6 +1479,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     Debug.WriteLine($"=== SHELL HIERARCHY: Parsed {_currentTreeData?.Count ?? 0} root nodes ===");
 
                     Debug.WriteLine("=== SHELL HIERARCHY: Navigating to TreeView state ===");
+                    // Tree view should block underlying UI
+                    _overlay.DisableUITouchEventPassthrough = true;
                     _currentState = PanelState.TreeView;
                     _overlay.Invalidate();
                     Debug.WriteLine("=== SHELL HIERARCHY: Navigation complete ===");
@@ -928,6 +1497,37 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Debug.WriteLine($"=== SHELL HIERARCHY ERROR (Async): {ex.Message} ===");
             Debug.WriteLine($"=== SHELL HIERARCHY STACK TRACE (Async): {ex.StackTrace} ===");
         }
+    }
+
+    private Task ShowPerformancesView()
+    {
+        try
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                _isPerformanceMinimized = false;
+                _currentState = PanelState.PerformancesView;
+                // Allow pass-through except header/buttons in PerformancesView
+                _overlay.DisableUITouchEventPassthrough = false;
+                // Initialize default position within safe area if not set
+                if (performanceXpos == 0 && performanceYpos == 0)
+                {
+                    var perfWidth = 220f;
+                    var perfHeight = CalculatePerformanceViewHeight();
+                    var maxX = Math.Max(safeLeft, dirtyRectWidth - safeRight - perfWidth);
+                    var maxY = Math.Max(safeTop, dirtyRectHeight - safeBottom - perfHeight);
+                    performanceXpos = Math.Clamp(safeLeft, safeLeft, maxX);
+                    performanceYpos = Math.Clamp(safeTop, safeTop, maxY);
+                }
+                _overlay.Invalidate();
+            });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"=== SHELL HIERARCHY ERROR (Async): {ex.Message} ===");
+            Debug.WriteLine($"=== SHELL HIERARCHY STACK TRACE (Async): {ex.StackTrace} ===");
+        }
+        return Task.CompletedTask;
     }
 
     private List<TreeNode> ParseVisualTreeDump(string dump)
@@ -1165,4 +1765,282 @@ public class DebugOverlayPanel : IWindowOverlayElement
             Debug.WriteLine($"=== ERROR: Failed to write debug file: {ex.Message} ===");
         }
     }
+
+
+    #region Performances
+
+    #region variables
+
+    private readonly FpsService _fpsService = new FpsService();
+
+    private double _overallScore;
+    private double _cpuUsage;
+    private TimeSpan _prevCpuTime;
+    private double _memoryUsage;
+    private int _threadCount;
+    private int _processorCount = Environment.ProcessorCount;
+
+
+    private volatile bool _stopRequested = false;
+    private Stopwatch _stopwatch;
+
+
+    //FPS >EMA (Exponential Moving Average)
+    private double _emaFrameTime = 0;
+    private double _emaFps = 0;
+    private const double _emaAlpha = 0.9;
+
+
+    //hitch
+    private const double HitchThresholdMs = 200;
+    private double _emaHitch = 0;
+    private double _emaHighestHitch = 0;
+    private double _emaLastHitch = 0;
+    private const double _emaHitchAlpha = 0.7; // more reactive than FPS/FrameTime
+
+
+    //GC
+    private int _gc0Prev = 0;
+    private int _gc1Prev = 0;
+    private int _gc2Prev = 0;
+
+    private int _gc0Delta = 0;
+    private int _gc1Delta = 0;
+    private int _gc2Delta = 0;
+
+
+    //Alloc/sec
+    private long _lastTotalMemory = 0;
+    private double _allocPerSec = 0;
+
+    private readonly Process _currentProcess = Process.GetCurrentProcess();
+    private long _lastAllocatedBytes = GC.GetTotalAllocatedBytes(false);
+
+    //Networking
+    long totalRequests = 0;
+    long totalSent = 0;
+    long totalReceived = 0;
+
+    //double totalRequestsPerSecond = 0;
+    //double totalSentPerSecond = 0;
+    //double totalReceivedPerSecond = 0;
+
+    double avgRequestTime = 0;
+
+    //overall score
+    private double _emaOverallScore = 0;
+    private const double _emaOverallAlpha = 0.6; // 0–1, bigger = more reactiv
+
+    private double _batteryMilliW = 0;
+    private bool _batteryMilliWAvailable = true;
+    #endregion
+
+    #region methods
+    private void StartMonitoringPerformances()
+    {
+        _stopRequested = false;
+        StartMetrics();
+    }
+
+    private void StartMetrics()
+    {
+        _stopwatch.Restart();
+#if !IOS && !MACCATALYST
+        _prevCpuTime = _currentProcess.TotalProcessorTime;
+#endif
+
+        Microsoft.Maui.Controls.Application.Current!.Dispatcher.StartTimer(TimeSpan.FromSeconds(1), () =>
+        {
+            if (_debugRibbonOptions.ShowAlloc_GC)
+                UpdateGcAndAllocMetrics();
+
+            UpdateExtraMetrics();
+
+            if (_debugRibbonOptions.ShowCPU_Usage)
+            {
+#if !IOS && !MACCATALYST
+                _memoryUsage = _currentProcess.WorkingSet64 / (1024 * 1024);
+                _threadCount = _currentProcess.Threads.Count;
+
+                var currentCpuTime = _currentProcess.TotalProcessorTime;
+                double cpuDelta = (currentCpuTime - _prevCpuTime).TotalMilliseconds;
+
+                double interval = _stopwatch.Elapsed.TotalMilliseconds; // ⬅️ real interval
+                _cpuUsage = (cpuDelta / interval) * 100 / _processorCount;
+
+                _prevCpuTime = currentCpuTime;
+#else
+                _memoryUsage = 0;
+                _threadCount = 0;
+                _cpuUsage = 0;
+#endif
+            }
+            _stopwatch.Restart();
+
+            //_overallScore = CalculateOverallScore();
+            //UpdateOverallScore(_overallScore);
+
+            MainThread.BeginInvokeOnMainThread(InvalidateOverlayToForceRedraw);
+
+            return !_stopRequested;
+        });
+    }
+
+    private void InvalidateOverlayToForceRedraw()
+    {
+        _overlay.Invalidate();
+    }
+
+    private void StopMonitoringPerformances()
+    {
+        _stopRequested = true;
+    }
+
+    private void FpsService_OnFrameTimeCalculated(double frameTimeMs)
+    {
+        const double MinFrameTime = 0.1; // ms, pentru a evita diviziunea la zero
+        frameTimeMs = Math.Max(frameTimeMs, MinFrameTime);
+
+        // EMA FrameTime
+        if (_emaFrameTime == 0)
+            _emaFrameTime = frameTimeMs;
+        else
+            _emaFrameTime = (_emaAlpha * _emaFrameTime) + ((1 - _emaAlpha) * frameTimeMs);
+
+        // EMA FPS
+        double fps = 1000.0 / frameTimeMs;
+        if (_emaFps == 0)
+            _emaFps = fps;
+        else
+            _emaFps = (_emaAlpha * _emaFps) + ((1 - _emaAlpha) * fps);
+
+        // Hitch EMA
+        double hitchValue = frameTimeMs >= HitchThresholdMs ? frameTimeMs : 0;
+        if (_emaHitch == 0)
+            _emaHitch = hitchValue;
+        else
+            _emaHitch = (_emaHitchAlpha * _emaHitch) + ((1 - _emaHitchAlpha) * hitchValue);
+
+        if (_emaHitch > HitchThresholdMs)
+            _emaLastHitch = _emaHitch;
+
+        if (_emaHitch > _emaHighestHitch)
+            _emaHighestHitch = _emaHitch;
+    }
+
+
+
+
+    private void UpdateGcAndAllocMetrics()
+    {
+        double elapsedSec = _stopwatch.Elapsed.TotalSeconds;
+        if (elapsedSec <= 0) elapsedSec = 1; // fallback
+
+        // Alloc/sec
+        long currentAllocated = GC.GetTotalAllocatedBytes(false);
+        long deltaAllocated = currentAllocated - _lastAllocatedBytes;
+        _allocPerSec = (deltaAllocated / (1024.0 * 1024.0)) / elapsedSec; // MB/sec
+        _lastAllocatedBytes = currentAllocated;
+
+        // GC counts
+        int gen0 = GC.CollectionCount(0);
+        int gen1 = GC.CollectionCount(1);
+        int gen2 = GC.CollectionCount(2);
+
+        _gc0Delta = gen0 - _gc0Prev;
+        _gc1Delta = gen1 - _gc1Prev;
+        _gc2Delta = gen2 - _gc2Prev;
+
+        _gc0Prev = gen0;
+        _gc1Prev = gen1;
+        _gc2Prev = gen2;
+
+    }
+
+    private void UpdateExtraMetrics()
+    {
+        if (_debugRibbonOptions.ShowBatteryUsage)
+            UpdateBatteryUsage();
+
+        //if (_debugRibbonOptions.ShowNetworkStats)
+        //    updateNetworkStats();
+
+    }
+
+    //private void updateNetworkStats()
+    //{
+    //NETWORK FOR MOMENT IS STILL IN TEST AND NOT FULLY TESTED
+
+    //var profiler = NetworkProfiler.Instance;
+
+    //totalRequests = profiler.TotalRequests;
+    //totalSent = profiler.TotalBytesSent;
+    //totalReceived = profiler.TotalBytesReceived;
+    //avgRequestTime = profiler.AverageRequestTimeMs;
+
+    //totalReceivedPerSecond = profiler.BytesReceivedPerSecond;
+    //totalSentPerSecond = profiler.BytesSentPerSecond;
+    //totalRequestsPerSecond = profiler.RequestsPerSecond;
+    //}
+
+    private void UpdateBatteryUsage()
+    {
+#if ANDROID
+        try
+        {
+            _batteryMilliW = BatteryService.GetBatteryMilliW();
+            _batteryMilliWAvailable = true;
+        }
+        catch
+        {
+            _batteryMilliW = 0;
+            _batteryMilliWAvailable = false;
+        }
+#else
+        _batteryMilliW = 0;
+        _batteryMilliWAvailable = false;
+#endif
+    }
+
+
+
+    //private double CalculateOverallScore()
+    //{
+    //    double score = 0;
+
+    //    // FPS (max 3 puncte)
+    //    if (_emaFps >= 50) score += 3;
+    //    else if (_emaFps >= 30) score += 2;
+    //    else score += 1;
+
+    //    // CPU (max 3 puncte)
+    //    if (_cpuUsage < 30) score += 3;
+    //    else if (_cpuUsage < 60) score += 2;
+    //    else score += 1;
+
+    //    // Memory (max 2 puncte)
+    //    if (_memoryUsage < 260) score += 2;
+    //    else if (_memoryUsage < 400) score += 1;
+    //    // >400 → 0
+
+    //    // Threads (max 2 puncte)
+    //    if (_threadCount < 50) score += 2;
+    //    else if (_threadCount < 100) score += 1;
+    //    // >100 → 0
+
+    //    return score; // max 10
+    //}
+
+    //private void UpdateOverallScore(double rawScore)
+    //{
+
+    //    if (_emaOverallScore == 0)
+    //        _emaOverallScore = rawScore;
+    //    else
+    //        _emaOverallScore = (_emaOverallAlpha * _emaOverallScore) + ((1 - _emaOverallAlpha) * rawScore);
+    //}
+
+    #endregion
+
+    #endregion
 }
