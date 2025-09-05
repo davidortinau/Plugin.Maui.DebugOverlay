@@ -48,7 +48,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     // Tree view state
     private float _scrollOffset = 0f;
-    private const float LineHeight = 20f;
+    private const float LineHeight = 22f;
     private List<RectF> _treeNodeRects = new();
 
     // Touch-based scrolling state
@@ -595,6 +595,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Determine if this is a property line early for use in rendering logic
         var name = node.Name;
         var details = node.Details;
+        bool isLoadingTimeLine = name.Contains("Loading time", StringComparison.OrdinalIgnoreCase);
         bool isPropertyLine = name.Equals("Size", StringComparison.OrdinalIgnoreCase) ||
                              name.Equals("Handler", StringComparison.OrdinalIgnoreCase) ||
                              name.Equals("PlatformView", StringComparison.OrdinalIgnoreCase) ||
@@ -633,7 +634,22 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var textStartX = node.Children.Count > 0 ? expanderX + expanderSize + 4 : nodeX + 4;
 
         // Draw node text with better formatting (variables already declared at top of method)
-        if (isPropertyLine)
+        if (isLoadingTimeLine)
+        {
+            var strippedLine = Plugin.Maui.DebugOverlay.Utils.Extensions.StripHexColor(details);
+            details = strippedLine.Text;    
+            // Property lines: smaller, dimmed, minimal indentation
+            canvas.FontColor = strippedLine.Color;// Color.FromArgb("#FFAAAAAA");
+            canvas.FontSize = 11;
+            canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
+
+            var displayText = string.IsNullOrEmpty(details) ? name : $"{name}: {details}"; 
+
+            // Minimal indentation for property lines - just align with parent element text
+            var propertyIndent = nodeX + 8; // Small offset instead of heavy indentation
+            canvas.DrawString(displayText, new RectF(propertyIndent, y, width - propertyIndent - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+        else if (isPropertyLine)
         {
             // Property lines: smaller, dimmed, minimal indentation
             canvas.FontColor = Color.FromArgb("#FFAAAAAA");
@@ -763,9 +779,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
                 buttonY += LabelHeight + LabelSpacing;
                 buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
-                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
+                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
             }
-             
+
             //Hitch
             textColor = CalculateColorFromPerformanceVale(_emaLastHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
@@ -1422,6 +1438,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
             var options = new VisualTreeDumpService.DumpOptions
             {
                 IncludeLayoutProperties = true,
+                IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
                 IncludeHandlerInfo = true,
                 IncludeMauiReactorInfo = true,
                 MaxDepth = 10
@@ -1459,6 +1476,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     var options = new VisualTreeDumpService.DumpOptions
                     {
                         IncludeLayoutProperties = true,
+                        IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
                         IncludeHandlerInfo = true,
                         IncludeMauiReactorInfo = true,
                         MaxDepth = 10
@@ -1611,6 +1629,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var isPropertyLine = line.TrimStart().StartsWith("Size:") ||
                             line.TrimStart().StartsWith("Position:") ||
                             line.TrimStart().StartsWith("Handler:") ||
+                            line.TrimStart().Contains("Loading time:") ||
                             line.TrimStart().StartsWith("PlatformView:") ||
                             line.TrimStart().StartsWith("PlatformBounds:") ||
                             (line.Contains("|") && (line.Contains("Size:") || line.Contains("Position:") || line.Contains("H:") || line.Contains("V:")));
@@ -2041,6 +2060,20 @@ public class DebugOverlayPanel : IWindowOverlayElement
     //}
 
     #endregion
+
+    #endregion
+
+
+    #region Loading Metrics
+    internal static Dictionary<Guid, double> ElementsLoadingTime = new Dictionary<Guid, double>();
+    internal static void AddMetricElementLoad(Guid elementId, string elementName, double totalMilliseconds)
+    {
+        Debug.WriteLine("Element Load" + elementName + " ms:" + totalMilliseconds);
+        if (ElementsLoadingTime.ContainsKey(elementId))
+            ElementsLoadingTime[elementId] = totalMilliseconds;
+        else
+            ElementsLoadingTime.Add(elementId, totalMilliseconds);
+    }
 
     #endregion
 }

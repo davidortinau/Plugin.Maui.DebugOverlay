@@ -32,7 +32,10 @@
         /// </summary>
         internal bool ShowFrame { get; private set; } = false;
 
-
+        /// <summary>
+        /// Show load time per ms
+        /// </summary>
+        internal bool ShowLoadTime { get; private set; } = false;
 
 
         //#########################################################
@@ -91,8 +94,14 @@
             ShowFrame = true;
             return this;
         }
+
+        /// <summary>
+        /// Enable or disable Load Time per components in ms
+        /// </summary>
+        public DebugRibbonOptions EnableLoadTimePerComponents()
+        {
+            ShowLoadTime = true;
+            return this;
+        }
     }
-
-
-
 }

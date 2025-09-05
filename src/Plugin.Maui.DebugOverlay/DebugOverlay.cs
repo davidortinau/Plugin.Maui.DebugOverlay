@@ -30,14 +30,14 @@ public class DebugOverlay : WindowOverlay
 
         Debug.WriteLine("DebugOverlay created with ribbon and panel elements");
         this.Tapped += DebugOverlay_Tapped;
-    
+
         var pan = new GlobalPanGesture();
         pan.PanUpdated += (s, e) =>
         {
             if (_isPanelVisible)
-            { 
+            {
                 _debugPanel.HandlePanUpdate(s, e);
-                return;  
+                return;
             }
         };
         pan.Attach(Window);
@@ -130,4 +130,5 @@ public class DebugOverlay : WindowOverlay
 
         _topInset = SafeAreaService.GetTopSafeAreaInset();
     }
+     
 }

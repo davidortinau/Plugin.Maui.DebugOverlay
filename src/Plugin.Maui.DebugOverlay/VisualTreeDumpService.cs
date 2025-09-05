@@ -1,6 +1,7 @@
+using Microsoft.Maui.Controls;
+using Microsoft.Maui.Handlers;
 using System.Reflection;
 using System.Text;
-using Microsoft.Maui.Handlers;
 
 namespace Plugin.Maui.DebugOverlay;
 
@@ -18,6 +19,7 @@ public class VisualTreeDumpService
     /// </summary>
     public class DumpOptions
     {
+        public bool IncludeLoadingTime { get; set; } = true;
         public bool IncludeLayoutProperties { get; set; } = true;
         public bool IncludeStyleProperties { get; set; } = false;
         public bool IncludeAllProperties { get; set; } = false;
@@ -43,7 +45,7 @@ public class VisualTreeDumpService
         _output.AppendLine("=== Visual Tree Dump ===");
         _output.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         _output.AppendLine($"Current Page: {currentPage.GetType().Name}");
-        
+
         // Also show the navigation context
         var mainPage = Microsoft.Maui.Controls.Application.Current?.MainPage;
         if (mainPage != currentPage)
@@ -51,7 +53,7 @@ public class VisualTreeDumpService
             _output.AppendLine($"Main Page: {mainPage?.GetType().Name}");
             _output.AppendLine($"Navigation Context: {GetNavigationContext(currentPage)}");
         }
-        
+
         _output.AppendLine();
 
         DumpElement(currentPage, options, 0);
@@ -119,7 +121,7 @@ public class VisualTreeDumpService
         var indent = new string(' ', depth * IndentSize);
         var elementType = element.GetType();
         var elementName = elementType.Name;
-        
+
         // Check if this might be a MauiReactor component wrapper
         var isMauiReactorWrapper = IsMauiReactorWrapper(elementType);
         var elementId = GetElementId(element);
@@ -127,13 +129,13 @@ public class VisualTreeDumpService
 
         _output.Append(indent);
         _output.Append($"├─ {elementName}");
-        
+
         // Add text content for easier identification
         if (!string.IsNullOrEmpty(elementText))
         {
             _output.Append($" \"{elementText}\"");
         }
-        
+
         if (!string.IsNullOrEmpty(elementId))
         {
             _output.Append($" (Id: {elementId})");
@@ -145,6 +147,13 @@ public class VisualTreeDumpService
         }
 
         _output.AppendLine();
+
+
+        // Dump properties based on options
+        if (options.IncludeLoadingTime)
+        {
+            DumpLoadingTime(element, depth + 1);
+        }
 
         // Dump properties based on options
         if (options.IncludeLayoutProperties)
@@ -172,6 +181,53 @@ public class VisualTreeDumpService
     }
 
     /// <summary>
+    /// Dumps loading time of an element
+    /// </summary>
+    private void DumpLoadingTime(Microsoft.Maui.Controls.Element element, int depth)
+    {
+        var indent = new string(' ', depth * IndentSize);
+        var layoutProps = new List<string>();
+
+        // Add loading time if available
+        if (DebugOverlayPanel.ElementsLoadingTime.ContainsKey(element.Id))
+        {
+            // Formats the loading time for display, adding an optional warning icon and HEX color at the end.
+            // - Shows ⚠️ icon for yellow or red thresholds.
+            // - Automatically converts milliseconds to seconds if >= 1000 ms.
+            // - Appends the HEX color at the end of the string.
+            var milliseconds = DebugOverlayPanel.ElementsLoadingTime[element.Id];
+
+            // Choose icon and color based on thresholds
+            string icon = string.Empty;
+            string hexColor;
+
+            if (milliseconds >= 1250)
+            {
+                icon = "⚠️ ";
+                hexColor = "#FFFF0000"; // red
+            }
+            else if (milliseconds >= 1000)
+            {
+                icon = "⚠️ ";
+                hexColor = "#FFFFFF00"; // yellow
+            }
+            else
+            {
+                hexColor = "#FFAAAAAA"; // grey (no icon)
+            }
+
+            // Format the time string
+            string timeText = milliseconds >= 1100
+                ? $"{milliseconds / 1000:F2} s" // convert to seconds
+                : $"{milliseconds:F0} ms";      // keep in milliseconds
+
+            // Return the complete formatted string
+            ;
+            _output.AppendLine($"{indent}  {icon}Loading time: {timeText} {hexColor}");
+        } 
+    }
+
+    /// <summary>
     /// Dumps layout-specific properties of an element
     /// </summary>
     private void DumpLayoutProperties(Microsoft.Maui.Controls.Element element, int depth)
@@ -185,19 +241,19 @@ public class VisualTreeDumpService
             // Core size and position - compact format
             layoutProps.Add($"Size: {visualElement.Width:F1}×{visualElement.Height:F1}");
             layoutProps.Add($"Position: ({visualElement.X:F1}, {visualElement.Y:F1})");
-            
+
             // Only show non-default values to reduce noise
             if (!visualElement.IsVisible) layoutProps.Add("IsVisible: False");
             if (Math.Abs(visualElement.Opacity - 1.0) > 0.01) layoutProps.Add($"Opacity: {visualElement.Opacity:F2}");
             if (Math.Abs(visualElement.Scale - 1.0) > 0.01) layoutProps.Add($"Scale: {visualElement.Scale:F2}");
             if (Math.Abs(visualElement.Rotation) > 0.01) layoutProps.Add($"Rotation: {visualElement.Rotation:F1}°");
-            
+
             // Layout options - Note: These properties may not exist in all MAUI versions
             try
             {
                 var horizontalOptionsProperty = visualElement.GetType().GetProperty("HorizontalOptions");
                 var verticalOptionsProperty = visualElement.GetType().GetProperty("VerticalOptions");
-                
+
                 if (horizontalOptionsProperty != null)
                 {
                     var horizontalOptions = horizontalOptionsProperty.GetValue(visualElement);
@@ -209,7 +265,7 @@ public class VisualTreeDumpService
                             layoutProps.Add($"H: {alignment}");
                     }
                 }
-                
+
                 if (verticalOptionsProperty != null)
                 {
                     var verticalOptions = verticalOptionsProperty.GetValue(visualElement);
@@ -221,14 +277,15 @@ public class VisualTreeDumpService
                             layoutProps.Add($"V: {alignment}");
                     }
                 }
-            } catch { /* Ignore if properties don't exist */ }
-            
+            }
+            catch { /* Ignore if properties don't exist */ }
+
             // Size requests - only if set
             if (visualElement.WidthRequest >= 0)
                 layoutProps.Add($"WReq: {visualElement.WidthRequest:F1}");
             if (visualElement.HeightRequest >= 0)
                 layoutProps.Add($"HReq: {visualElement.HeightRequest:F1}");
-            
+
             // Minimum size - only if non-default
             if (visualElement.MinimumWidthRequest > -1)
                 layoutProps.Add($"MinW: {visualElement.MinimumWidthRequest:F1}");
@@ -289,16 +346,16 @@ public class VisualTreeDumpService
     private void DumpHandlerInfo(Microsoft.Maui.Controls.Element element, int depth)
     {
         var indent = new string(' ', depth * IndentSize);
-        
+
         if (element is Microsoft.Maui.Controls.VisualElement visualElement && visualElement.Handler != null)
         {
             var handler = visualElement.Handler;
             var handlerType = handler.GetType().Name;
             var platformViewType = handler.PlatformView?.GetType().Name ?? "null";
-            
+
             _output.AppendLine($"{indent}  Handler: {handlerType}");
             _output.AppendLine($"{indent}  PlatformView: {platformViewType}");
-            
+
             // Try to get platform-specific bounds if available
             if (handler.PlatformView != null)
             {
@@ -324,7 +381,7 @@ public class VisualTreeDumpService
     private void DumpStyleProperties(Microsoft.Maui.Controls.Element element, int depth)
     {
         var indent = new string(' ', depth * IndentSize);
-        
+
         if (element is Microsoft.Maui.Controls.VisualElement visualElement)
         {
             _output.AppendLine($"{indent}  Style: {visualElement.Style?.GetType().Name ?? "None"}");
@@ -349,7 +406,7 @@ public class VisualTreeDumpService
     {
         // Get children using different methods based on element type
         var children = GetChildElements(element);
-        
+
         foreach (var child in children)
         {
             DumpElement(child, options, depth + 1);
@@ -452,13 +509,13 @@ public class VisualTreeDumpService
     {
         if (!string.IsNullOrEmpty(element.ClassId))
             return element.ClassId;
-        
+
         if (!string.IsNullOrEmpty(element.StyleId))
             return element.StyleId;
-        
+
         if (element is Microsoft.Maui.Controls.VisualElement visualElement && !string.IsNullOrEmpty(visualElement.AutomationId))
             return visualElement.AutomationId;
-        
+
         return string.Empty;
     }
 
@@ -469,8 +526,8 @@ public class VisualTreeDumpService
     {
         // Check if the type name or namespace suggests MauiReactor
         var typeName = elementType.FullName ?? elementType.Name;
-        
-        return typeName.Contains("MauiReactor") || 
+
+        return typeName.Contains("MauiReactor") ||
                typeName.Contains("Reactor") ||
                elementType.Assembly.GetName().Name?.Contains("MauiReactor") == true ||
                elementType.Assembly.GetName().Name?.Contains("Reactor") == true;
@@ -558,19 +615,19 @@ public class VisualTreeDumpService
                 }
             }
         }
-        
+
         // If the main page is a NavigationPage, get the current page
         if (mainPage is Microsoft.Maui.Controls.NavigationPage navigationPage)
         {
             return navigationPage.CurrentPage;
         }
-        
+
         // If the main page is a TabbedPage, get the current page
         if (mainPage is Microsoft.Maui.Controls.TabbedPage tabbedPage)
         {
             return tabbedPage.CurrentPage;
         }
-        
+
         // If the main page is a FlyoutPage, get the detail page
         if (mainPage is Microsoft.Maui.Controls.FlyoutPage flyoutPage)
         {
@@ -588,20 +645,20 @@ public class VisualTreeDumpService
     {
         var context = new List<string>();
         var mainPage = Microsoft.Maui.Controls.Application.Current?.MainPage;
-        
+
         if (mainPage is Microsoft.Maui.Controls.Shell shell)
         {
             context.Add("Shell");
-            
+
             if (shell.CurrentItem != null)
             {
                 context.Add($"Item: {shell.CurrentItem.GetType().Name}");
-                
+
                 if (shell.CurrentItem.Title != null)
                 {
                     context.Add($"Title: '{shell.CurrentItem.Title}'");
                 }
-                
+
                 // Add route information if available
                 try
                 {
@@ -640,7 +697,7 @@ public class VisualTreeDumpService
         {
             context.Add("FlyoutPage Detail");
         }
-        
+
         return context.Count > 0 ? string.Join(" > ", context) : "Direct";
     }
 
@@ -656,22 +713,22 @@ public class VisualTreeDumpService
             // First, try to get the Alignment and Expands properties
             var alignmentProperty = layoutOptions.GetType().GetProperty("Alignment");
             var expandsProperty = layoutOptions.GetType().GetProperty("Expands");
-            
+
             if (alignmentProperty != null)
             {
                 var alignment = alignmentProperty.GetValue(layoutOptions);
                 var expands = expandsProperty?.GetValue(layoutOptions);
-                
+
                 if (alignment != null)
                 {
                     var alignmentStr = alignment.ToString();
-                    
+
                     // Add "AndExpand" if the Expands property is true
                     if (expands is bool expandsBool && expandsBool)
                     {
                         alignmentStr += "AndExpand";
                     }
-                    
+
                     return alignmentStr;
                 }
             }
@@ -679,13 +736,13 @@ public class VisualTreeDumpService
             // Fallback: Check against common LayoutOptions static values by comparing the object
             var layoutOptionsType = layoutOptions.GetType();
             var layoutOptionsFullName = layoutOptionsType.FullName;
-            
+
             // If it's a Microsoft.Maui.Controls.LayoutOptions, try to match against known values
             if (layoutOptionsFullName?.Contains("LayoutOptions") == true)
             {
                 // Try to get the declaring type to access static properties
                 var declaringType = layoutOptionsType.DeclaringType ?? layoutOptionsType;
-                
+
                 // Check common static properties
                 var commonOptions = new[]
                 {
@@ -719,8 +776,8 @@ public class VisualTreeDumpService
 
             // Last resort: return ToString() result
             var str = layoutOptions.ToString();
-            return str?.Contains("LayoutOptions") == true ? 
-                   str.Replace("Microsoft.Maui.Controls.LayoutOptions", "").Trim() : 
+            return str?.Contains("LayoutOptions") == true ?
+                   str.Replace("Microsoft.Maui.Controls.LayoutOptions", "").Trim() :
                    str ?? string.Empty;
         }
         catch
@@ -836,18 +893,18 @@ public class VisualTreeDumpService
     private string TruncateText(string text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
-        
+
         const int maxLength = 50;
-        
+
         // Remove newlines and extra whitespace
         text = text.Replace('\n', ' ').Replace('\r', ' ');
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
-        
+
         if (text.Length > maxLength)
         {
             return text.Substring(0, maxLength - 3) + "...";
         }
-        
+
         return text;
     }
 }
