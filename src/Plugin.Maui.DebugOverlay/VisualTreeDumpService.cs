@@ -9,17 +9,20 @@ namespace Plugin.Maui.DebugOverlay;
 /// Service for dumping the visual tree of MAUI applications, including MauiReactor components.
 /// Focuses on layout properties and hierarchy visualization for debugging purposes.
 /// </summary>
-public class VisualTreeDumpService
+internal class VisualTreeDumpService
 {
+    protected LoadTimeMetricsStore _loadTimeMetricsStore;
     private readonly StringBuilder _output = new();
     private const int IndentSize = 2;
 
     /// <summary>
     /// Configuration for what information to include in the dump
     /// </summary>
-    public class DumpOptions
+    internal class DumpOptions
     {
         public bool IncludeLoadingTime { get; set; } = true;
+        public int SlowThresholdMs { get; set; } = 0;
+        public int CriticalThresholdMs { get; set; } = 0;
         public bool IncludeLayoutProperties { get; set; } = true;
         public bool IncludeStyleProperties { get; set; } = false;
         public bool IncludeAllProperties { get; set; } = false;
@@ -28,10 +31,15 @@ public class VisualTreeDumpService
         public int MaxDepth { get; set; } = -1; // -1 for unlimited
     }
 
+    public VisualTreeDumpService(LoadTimeMetricsStore loadTimeMetricsStore)
+    {
+        _loadTimeMetricsStore = loadTimeMetricsStore;
+    }
+
     /// <summary>
     /// Dumps the visual tree starting from the current application main page
     /// </summary>
-    public string DumpCurrentPage(DumpOptions options = null)
+    internal string DumpCurrentPage(DumpOptions options = null)
     {
         options ??= new DumpOptions();
         _output.Clear();
@@ -152,7 +160,7 @@ public class VisualTreeDumpService
         // Dump properties based on options
         if (options.IncludeLoadingTime)
         {
-            DumpLoadingTime(element, depth + 1);
+            DumpLoadingTime(element, depth + 1, options.SlowThresholdMs, options.CriticalThresholdMs);
         }
 
         // Dump properties based on options
@@ -183,30 +191,31 @@ public class VisualTreeDumpService
     /// <summary>
     /// Dumps loading time of an element
     /// </summary>
-    private void DumpLoadingTime(Microsoft.Maui.Controls.Element element, int depth)
+    private void DumpLoadingTime(Microsoft.Maui.Controls.Element element, int depth, int slowThresholdMs, int criticalThresholdMs)
     {
         var indent = new string(' ', depth * IndentSize);
         var layoutProps = new List<string>();
 
         // Add loading time if available
-        if (DebugOverlayPanel.ElementsLoadingTime.ContainsKey(element.Id))
+        var metrics = _loadTimeMetricsStore.GetAll();
+        if (metrics.ContainsKey(element.Id))
         {
             // Formats the loading time for display, adding an optional warning icon and HEX color at the end.
             // - Shows ⚠️ icon for yellow or red thresholds.
             // - Automatically converts milliseconds to seconds if >= 1000 ms.
             // - Appends the HEX color at the end of the string.
-            var milliseconds = DebugOverlayPanel.ElementsLoadingTime[element.Id];
+            var milliseconds = metrics[element.Id];
 
             // Choose icon and color based on thresholds
             string icon = string.Empty;
             string hexColor;
 
-            if (milliseconds >= 1250)
+            if (milliseconds >= criticalThresholdMs)
             {
                 icon = "⚠️ ";
                 hexColor = "#FFFF0000"; // red
             }
-            else if (milliseconds >= 1000)
+            else if (milliseconds >= slowThresholdMs)
             {
                 icon = "⚠️ ";
                 hexColor = "#FFFFFF00"; // yellow
@@ -224,7 +233,7 @@ public class VisualTreeDumpService
             // Return the complete formatted string
             ;
             _output.AppendLine($"{indent}  {icon}Loading time: {timeText} {hexColor}");
-        } 
+        }
     }
 
     /// <summary>

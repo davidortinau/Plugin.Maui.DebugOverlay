@@ -19,9 +19,10 @@ public class TreeNode
 /// Represents a debug panel that displays over the app with MAUI version info and debugging tools.
 /// Uses graphics rendering for cross-platform compatibility with the overlay system.
 /// </summary>
-public class DebugOverlayPanel : IWindowOverlayElement
+internal class DebugOverlayPanel : IWindowOverlayElement
 {
     protected DebugRibbonOptions _debugRibbonOptions;
+    protected LoadTimeMetricsStore _loadTimeMetricsStore;
     private readonly DebugOverlay _overlay;
     private readonly VisualTreeDumpService _dumpService;
     private readonly Color _panelBackgroundColor;
@@ -94,12 +95,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color? panelBackgroundColor = null)
+    internal DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, LoadTimeMetricsStore loadTimeMetricsStore, Color? panelBackgroundColor = null)
     {
+        _loadTimeMetricsStore = loadTimeMetricsStore;
         _debugRibbonOptions = debugRibbonOptions;
         _overlay = overlay;
 
-        _dumpService = new VisualTreeDumpService();
+        _dumpService = new VisualTreeDumpService(_loadTimeMetricsStore);
         _panelBackgroundColor = panelBackgroundColor ?? Color.FromArgb("#E0000000"); // Semi-transparent black
         _buttonBackgroundColor = Color.FromArgb("#FF4A4A4A"); // Dark gray buttons
         _textColor = Colors.White;
@@ -122,7 +124,15 @@ public class DebugOverlayPanel : IWindowOverlayElement
         safeBottom = safe.bottom;
         safeLeft = safe.left;
         safeRight = safe.right;
+
+        _loadTimeMetricsStore.CollectionChanged += (action, id, ms) =>
+        {
+            CheckIfLoadTimeExceededSlowThreshold();
+            _overlay.Invalidate(); // Redraw ribbon to update warning state if needed
+        };
     }
+
+
 
     public bool Contains(Point point)
     {
@@ -328,7 +338,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Visual Tree Dump Button
         _visualTreeButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, _visualTreeButtonRect, "🔍 View Visual Tree", _buttonBackgroundColor);
+        DrawButton(canvas, _visualTreeButtonRect, "🔍 View Visual Tree" + _attentionInfoLoadTime, _buttonBackgroundColor);
 
         // Shell Hierarchy Button
         buttonY += ButtonHeight + ButtonSpacing;
@@ -637,13 +647,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
         if (isLoadingTimeLine)
         {
             var strippedLine = Plugin.Maui.DebugOverlay.Utils.Extensions.StripHexColor(details);
-            details = strippedLine.Text;    
+            details = strippedLine.Text;
             // Property lines: smaller, dimmed, minimal indentation
             canvas.FontColor = strippedLine.Color;// Color.FromArgb("#FFAAAAAA");
             canvas.FontSize = 11;
             canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
 
-            var displayText = string.IsNullOrEmpty(details) ? name : $"{name}: {details}"; 
+            var displayText = string.IsNullOrEmpty(details) ? name : $"{name}: {details}";
 
             // Minimal indentation for property lines - just align with parent element text
             var propertyIndent = nodeX + 8; // Small offset instead of heavy indentation
@@ -1439,6 +1449,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 IncludeLayoutProperties = true,
                 IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
+                CriticalThresholdMs = _debugRibbonOptions.CriticalThresholdMs,
+                SlowThresholdMs = _debugRibbonOptions.SlowThresholdMs,
                 IncludeHandlerInfo = true,
                 IncludeMauiReactorInfo = true,
                 MaxDepth = 10
@@ -1477,6 +1489,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     {
                         IncludeLayoutProperties = true,
                         IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
+                        CriticalThresholdMs = _debugRibbonOptions.CriticalThresholdMs,
+                        SlowThresholdMs = _debugRibbonOptions.SlowThresholdMs,
                         IncludeHandlerInfo = true,
                         IncludeMauiReactorInfo = true,
                         MaxDepth = 10
@@ -2065,15 +2079,12 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
 
     #region Loading Metrics
-    internal static Dictionary<Guid, double> ElementsLoadingTime = new Dictionary<Guid, double>();
-    internal static void AddMetricElementLoad(Guid elementId, string elementName, double totalMilliseconds)
+    private string _attentionInfoLoadTime = "";
+    private void CheckIfLoadTimeExceededSlowThreshold()
     {
-        Debug.WriteLine("Element Load" + elementName + " ms:" + totalMilliseconds);
-        if (ElementsLoadingTime.ContainsKey(elementId))
-            ElementsLoadingTime[elementId] = totalMilliseconds;
-        else
-            ElementsLoadingTime.Add(elementId, totalMilliseconds);
+        if (_loadTimeMetricsStore.GetAll().Values.Count(x => x >= _debugRibbonOptions.SlowThresholdMs) > 0)
+            _attentionInfoLoadTime = " ⚠️";
+        else _attentionInfoLoadTime = "";
     }
-
     #endregion
 }

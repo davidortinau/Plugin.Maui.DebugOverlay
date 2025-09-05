@@ -1,4 +1,5 @@
 using Microsoft.Maui.Handlers;
+using Plugin.Maui.DebugOverlay.Utils;
 using System.Diagnostics;
 
 namespace Plugin.Maui.DebugOverlay;
@@ -13,16 +14,17 @@ public static class MauiProgramExtensions
         {
 
 #if DEBUG
+            LoadTimeMetricsStore loadTimeMetricsStore = new LoadTimeMetricsStore();
+
             WindowHandler.Mapper.AppendToMapping("AddDebugOverlay", (handler, view) =>
             {
                 Debug.WriteLine("Adding DebugOverlay");
-                var overlay = new DebugOverlay(handler.VirtualView, options);
+                var overlay = new DebugOverlay(handler.VirtualView, options, loadTimeMetricsStore);
                 handler.VirtualView.AddOverlay(overlay);
-
             });
 
             if (options.ShowLoadTime)
-            { 
+            {
                 // Add metrics for load VisualElement (including layouts, controls)
                 ViewHandler.ViewMapper.AppendToMapping("MeasureComponentLoad", (handler, view) =>
                 {
@@ -52,7 +54,7 @@ public static class MauiProgramExtensions
                             if (swLoaded.IsRunning)
                             {
                                 swLoaded.Stop();
-                                DebugOverlayPanel.AddMetricElementLoad(ve.Id, ve.GetType().Name, swLoaded.Elapsed.TotalMilliseconds);
+                                loadTimeMetricsStore.Add(ve.Id, swLoaded.Elapsed.TotalMilliseconds);
                             }
                         };
                     }
@@ -65,5 +67,5 @@ public static class MauiProgramExtensions
 
 
         return builder;
-    } 
+    }
 }
