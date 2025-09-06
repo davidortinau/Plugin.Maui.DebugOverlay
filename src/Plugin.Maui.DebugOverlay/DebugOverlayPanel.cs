@@ -7,6 +7,7 @@ namespace Plugin.Maui.DebugOverlay;
 
 public class TreeNode
 {
+    public Guid Id { get; set; } = Guid.Empty;
     public string Name { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
     public List<TreeNode> Children { get; set; } = new();
@@ -19,9 +20,10 @@ public class TreeNode
 /// Represents a debug panel that displays over the app with MAUI version info and debugging tools.
 /// Uses graphics rendering for cross-platform compatibility with the overlay system.
 /// </summary>
-public class DebugOverlayPanel : IWindowOverlayElement
+internal class DebugOverlayPanel : IWindowOverlayElement
 {
     protected DebugRibbonOptions _debugRibbonOptions;
+    protected LoadTimeMetricsStore _loadTimeMetricsStore;
     private readonly DebugOverlay _overlay;
     private readonly VisualTreeDumpService _dumpService;
     private readonly Color _panelBackgroundColor;
@@ -48,7 +50,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     // Tree view state
     private float _scrollOffset = 0f;
-    private const float LineHeight = 20f;
+    private const float LineHeight = 22f;
     private List<RectF> _treeNodeRects = new();
 
     // Touch-based scrolling state
@@ -88,18 +90,31 @@ public class DebugOverlayPanel : IWindowOverlayElement
     private int _performanceViewPosState = 0;
 
 
+    //needed for scrollbar Treeview
+    private RectF _scrollBarRect;
+    private RectF _scrollThumbRect;
+
+    private bool _isDraggingScrollBar = false;
+    private float _scrollDragStartY = 0;
+    private float _scrollOffsetStart = 0;
+    private float _maxScrollOffset = 0;
+
+    private float _scrollPosition = 0f; // 0..1  
+
+
     public bool IsVisible
     {
         get => _isVisible;
         set => _isVisible = value;
     }
 
-    public DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, Color? panelBackgroundColor = null)
+    internal DebugOverlayPanel(DebugOverlay overlay, DebugRibbonOptions debugRibbonOptions, LoadTimeMetricsStore loadTimeMetricsStore, Color? panelBackgroundColor = null)
     {
+        _loadTimeMetricsStore = loadTimeMetricsStore;
         _debugRibbonOptions = debugRibbonOptions;
         _overlay = overlay;
 
-        _dumpService = new VisualTreeDumpService();
+        _dumpService = new VisualTreeDumpService(_loadTimeMetricsStore);
         _panelBackgroundColor = panelBackgroundColor ?? Color.FromArgb("#E0000000"); // Semi-transparent black
         _buttonBackgroundColor = Color.FromArgb("#FF4A4A4A"); // Dark gray buttons
         _textColor = Colors.White;
@@ -122,7 +137,15 @@ public class DebugOverlayPanel : IWindowOverlayElement
         safeBottom = safe.bottom;
         safeLeft = safe.left;
         safeRight = safe.right;
+
+        _loadTimeMetricsStore.CollectionChanged += (action, id, ms) =>
+        {
+            CheckIfLoadTimeExceededSlowThreshold();
+            _overlay.Invalidate(); // Redraw ribbon to update warning state if needed
+        };
     }
+
+
 
     public bool Contains(Point point)
     {
@@ -260,8 +283,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
             {
                 // Draw tree view UI within content area
                 DrawTreeViewHeader(canvas, contentRect);
-                DrawTreeView(canvas, contentRect);
+                var contentHeight = DrawTreeView(canvas, contentRect);
                 DrawBackButton(canvas, contentRect);
+                DrawScrollBar(canvas, contentRect, contentHeight);
                 DrawScrollButtons(canvas, contentRect);
             }
             else if (_currentState == PanelState.PerformancesView)
@@ -328,7 +352,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
         // Visual Tree Dump Button
         _visualTreeButtonRect = new RectF(contentRect.X, buttonY, buttonWidth, ButtonHeight);
-        DrawButton(canvas, _visualTreeButtonRect, "🔍 View Visual Tree", _buttonBackgroundColor);
+        DrawButton(canvas, _visualTreeButtonRect, "🔍 View Visual Tree" + _attentionInfoLoadTime, _buttonBackgroundColor);
 
         // Shell Hierarchy Button
         buttonY += ButtonHeight + ButtonSpacing;
@@ -503,6 +527,49 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
+    private void DrawScrollBar(ICanvas canvas, RectF contentRect, float visibleHeight)
+    {
+        var totalContentHeight = CalculateTreeContentHeight();
+
+        if (totalContentHeight <= visibleHeight)
+            return;
+
+        _maxScrollOffset = Math.Max(0, totalContentHeight - visibleHeight);
+        _scrollOffset = Math.Clamp(_scrollOffset, 0, _maxScrollOffset);
+
+        var barWidth = 12f;
+        var margin = 8f;
+
+        _scrollBarRect = new RectF(
+            contentRect.Right - barWidth - margin,
+            contentRect.Top + margin + 50,
+            barWidth,
+            contentRect.Height - 50 - margin * 2);
+
+        _scrollPosition = _maxScrollOffset > 0
+            ? Math.Clamp(_scrollOffset / _maxScrollOffset, 0f, 1f)
+            : 0f;
+
+        float ratio = visibleHeight / totalContentHeight;
+        float thumbHeight = Math.Max(30, _scrollBarRect.Height * ratio);
+
+        float thumbTrackRange = _scrollBarRect.Height - thumbHeight;
+        float thumbY = _scrollBarRect.Y + thumbTrackRange * _scrollPosition;
+
+        // Siguranță în plus (în caz de rotunjiri)
+        thumbY = Math.Clamp(thumbY, _scrollBarRect.Top, _scrollBarRect.Bottom - thumbHeight);
+
+        _scrollThumbRect = new RectF(_scrollBarRect.X, thumbY, barWidth, thumbHeight);
+
+        canvas.SaveState();
+        canvas.FillColor = Color.FromArgb("#333333");
+        canvas.FillRoundedRectangle(_scrollBarRect, 6);
+
+        canvas.FillColor = Color.FromArgb("#AAAAAA");
+        canvas.FillRoundedRectangle(_scrollThumbRect, 6);
+        canvas.RestoreState();
+    }
+
     private void DrawScrollButtons(ICanvas canvas, RectF contentRect)
     {
         if (_currentTreeData == null) return;
@@ -556,10 +623,10 @@ public class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
-    private void DrawTreeView(ICanvas canvas, RectF contentRect)
+    private float DrawTreeView(ICanvas canvas, RectF contentRect)
     {
         if (_currentTreeData == null || _currentTreeData.Count == 0)
-            return;
+            return 0;
 
         canvas.SaveState();
 
@@ -584,6 +651,8 @@ public class DebugOverlayPanel : IWindowOverlayElement
         }
 
         canvas.RestoreState();
+
+        return treeContentRect.Height;
     }
 
     private float DrawTreeNode(ICanvas canvas, TreeNode node, float x, float y, float width)
@@ -595,6 +664,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         // Determine if this is a property line early for use in rendering logic
         var name = node.Name;
         var details = node.Details;
+        bool isLoadingTimeLine = name.Contains("Loading time", StringComparison.OrdinalIgnoreCase);
         bool isPropertyLine = name.Equals("Size", StringComparison.OrdinalIgnoreCase) ||
                              name.Equals("Handler", StringComparison.OrdinalIgnoreCase) ||
                              name.Equals("PlatformView", StringComparison.OrdinalIgnoreCase) ||
@@ -633,7 +703,22 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var textStartX = node.Children.Count > 0 ? expanderX + expanderSize + 4 : nodeX + 4;
 
         // Draw node text with better formatting (variables already declared at top of method)
-        if (isPropertyLine)
+        if (isLoadingTimeLine)
+        {
+            var strippedLine = Plugin.Maui.DebugOverlay.Utils.Extensions.StripHexColor(details);
+            details = strippedLine.Text;
+            // Property lines: smaller, dimmed, minimal indentation
+            canvas.FontColor = strippedLine.Color;// Color.FromArgb("#FFAAAAAA");
+            canvas.FontSize = 11;
+            canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
+
+            var displayText = string.IsNullOrEmpty(details) ? name : $"{name}: {details}";
+
+            // Minimal indentation for property lines - just align with parent element text
+            var propertyIndent = nodeX + 8; // Small offset instead of heavy indentation
+            canvas.DrawString(displayText, new RectF(propertyIndent, y, width - propertyIndent - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+        else if (isPropertyLine)
         {
             // Property lines: smaller, dimmed, minimal indentation
             canvas.FontColor = Color.FromArgb("#FFAAAAAA");
@@ -653,6 +738,17 @@ public class DebugOverlayPanel : IWindowOverlayElement
             // Element lines: prominent display
             if (!string.IsNullOrEmpty(name))
             {
+                string loadTimeWarning = "";
+                if (node.Children != null && node.Children.Count > 0)
+                {
+                    var flattened = new List<TreeNode>();
+                    FlattenNodes(node, flattened);
+                    var loadMetrics = _loadTimeMetricsStore.GetAll();
+                    if (flattened.FirstOrDefault(x => loadMetrics.ContainsKey(x.Id) && loadMetrics[x.Id] > _debugRibbonOptions.SlowThresholdMs) != null)
+                        loadTimeWarning = "⚠️";
+                }
+
+
                 // Draw element name in bold white
                 canvas.FontColor = Colors.White;
                 canvas.FontSize = 13;
@@ -660,7 +756,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
                 // Truncate very long names
                 var displayName = name.Length > 40 ? name[..37] + "..." : name;
-                canvas.DrawString(displayName, new RectF(textStartX, y, width - textStartX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(displayName + loadTimeWarning, new RectF(textStartX, y, width - textStartX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
 
             if (!string.IsNullOrEmpty(details))
@@ -684,7 +780,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
 
                 var detailsText = details.Length > 50 ? details[..47] + "..." : details;
-                canvas.DrawString(detailsText, new RectF(textStartX + nameWidth + 8, y, width - textStartX - nameWidth - 8, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(detailsText, new RectF(textStartX + nameWidth + 14, y, width - textStartX - nameWidth - 8, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
 
@@ -763,9 +859,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 textColor = CalculateColorFromPerformanceVale(_emaHitch, 200, 400, true);
                 buttonY += LabelHeight + LabelSpacing;
                 buttonRect = new RectF(contentLeft, buttonY, buttonWidth, LabelHeight);
-                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor); 
+                DrawLabel(canvas, buttonRect, $"🎯 Current Hitch: {_emaHitch:F0} ms", _buttonBackgroundColor, textColor);
             }
-             
+
             //Hitch
             textColor = CalculateColorFromPerformanceVale(_emaLastHitch, 200, 400, true);
             buttonY += LabelHeight + LabelSpacing;
@@ -1085,6 +1181,50 @@ public class DebugOverlayPanel : IWindowOverlayElement
                 _overlay.Invalidate();
             }
         }
+        else if (_currentState == PanelState.TreeView)
+        {
+            switch (e.Status)
+            {
+                case GlobalPanGesture.GestureStatus.Started:
+                    var startPoint = new Point(e.X, e.Y);
+
+                    // Start dragging if the gesture begins inside scrollbar thumb
+                    if (_scrollThumbRect.Contains(startPoint))
+                    {
+                        _isDraggingScrollBar = true;
+                        _scrollDragStartY = (float)e.Y;
+                        _scrollOffsetStart = _scrollOffset;
+                    }
+                    else
+                    {
+                        _isDraggingScrollBar = false;
+                    }
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Running:
+                    if (_isDraggingScrollBar)
+                    {
+                        // How much user moved relative to thumb track
+                        float deltaY = (float)e.Y - _scrollDragStartY;
+
+                        // Ratio: how many content px per track px
+                        float thumbTrackRange = _scrollBarRect.Height - _scrollThumbRect.Height;
+                        if (thumbTrackRange > 0)
+                        {
+                            float scrollRatio = _maxScrollOffset / thumbTrackRange;
+                            _scrollOffset = Math.Clamp(_scrollOffsetStart + deltaY * scrollRatio, 0, _maxScrollOffset);
+                            _overlay.Invalidate();
+                        }
+                    }
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Completed:
+                    _isDraggingScrollBar = false;
+                    break;
+            }
+        }
+
+
     }
 
     private bool HandleMainMenuTap(Point point, DateTime currentTime, double timeSinceLastButtonTap)
@@ -1422,6 +1562,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
             var options = new VisualTreeDumpService.DumpOptions
             {
                 IncludeLayoutProperties = true,
+                IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
+                CriticalThresholdMs = _debugRibbonOptions.CriticalThresholdMs,
+                SlowThresholdMs = _debugRibbonOptions.SlowThresholdMs,
                 IncludeHandlerInfo = true,
                 IncludeMauiReactorInfo = true,
                 MaxDepth = 10
@@ -1459,6 +1602,9 @@ public class DebugOverlayPanel : IWindowOverlayElement
                     var options = new VisualTreeDumpService.DumpOptions
                     {
                         IncludeLayoutProperties = true,
+                        IncludeLoadingTime = _debugRibbonOptions.ShowLoadTime,
+                        CriticalThresholdMs = _debugRibbonOptions.CriticalThresholdMs,
+                        SlowThresholdMs = _debugRibbonOptions.SlowThresholdMs,
                         IncludeHandlerInfo = true,
                         IncludeMauiReactorInfo = true,
                         MaxDepth = 10
@@ -1549,11 +1695,13 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
             // Extract element name and details
             var (name, details) = ExtractNodeInfo(cleanLine);
-
+            var (guid, cleanedName) = Plugin.Maui.DebugOverlay.Utils.Extensions.ExtractGuidFromString(name);
+            var (detGuid, cleanedDetails) = Plugin.Maui.DebugOverlay.Utils.Extensions.ExtractGuidFromString(details);
             var node = new TreeNode
             {
-                Name = name,
-                Details = details,
+                Name = cleanedName,
+                Details = cleanedDetails,
+                Id = guid == Guid.Empty ? detGuid : guid,
                 Depth = depth,
                 FullText = cleanLine,
                 IsExpanded = false // Start collapsed by default
@@ -1611,6 +1759,7 @@ public class DebugOverlayPanel : IWindowOverlayElement
         var isPropertyLine = line.TrimStart().StartsWith("Size:") ||
                             line.TrimStart().StartsWith("Position:") ||
                             line.TrimStart().StartsWith("Handler:") ||
+                            line.TrimStart().Contains("Loading time:") ||
                             line.TrimStart().StartsWith("PlatformView:") ||
                             line.TrimStart().StartsWith("PlatformBounds:") ||
                             (line.Contains("|") && (line.Contains("Size:") || line.Contains("Position:") || line.Contains("H:") || line.Contains("V:")));
@@ -2042,5 +2191,16 @@ public class DebugOverlayPanel : IWindowOverlayElement
 
     #endregion
 
+    #endregion
+
+
+    #region Loading Metrics
+    private string _attentionInfoLoadTime = "";
+    private void CheckIfLoadTimeExceededSlowThreshold()
+    {
+        if (_loadTimeMetricsStore.GetAll().Values.Count(x => x >= _debugRibbonOptions.SlowThresholdMs) > 0)
+            _attentionInfoLoadTime = " ⚠️";
+        else _attentionInfoLoadTime = "";
+    }
     #endregion
 }
