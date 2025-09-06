@@ -17,7 +17,8 @@ public static class MauiProgram
                     .EnableGC()
                     .EnableCPU()
                     .EnableMemory()
-                    .EnableFrame() ;
+                    .EnableFrame()
+                    .EnableLoadTimePerComponents(700, 800);
             })
             .ConfigureFonts(fonts =>
             {
