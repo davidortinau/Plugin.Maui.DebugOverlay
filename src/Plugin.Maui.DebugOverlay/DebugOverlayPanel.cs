@@ -7,6 +7,7 @@ namespace Plugin.Maui.DebugOverlay;
 
 public class TreeNode
 {
+    public Guid Id { get; set; } = Guid.Empty;
     public string Name { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
     public List<TreeNode> Children { get; set; } = new();
@@ -525,7 +526,7 @@ internal class DebugOverlayPanel : IWindowOverlayElement
 
         canvas.RestoreState();
     }
-     
+
     private void DrawScrollBar(ICanvas canvas, RectF contentRect, float visibleHeight)
     {
         var totalContentHeight = CalculateTreeContentHeight();
@@ -568,7 +569,7 @@ internal class DebugOverlayPanel : IWindowOverlayElement
         canvas.FillRoundedRectangle(_scrollThumbRect, 6);
         canvas.RestoreState();
     }
-      
+
     private void DrawScrollButtons(ICanvas canvas, RectF contentRect)
     {
         if (_currentTreeData == null) return;
@@ -737,6 +738,17 @@ internal class DebugOverlayPanel : IWindowOverlayElement
             // Element lines: prominent display
             if (!string.IsNullOrEmpty(name))
             {
+                string loadTimeWarning = "";
+                if (node.Children != null && node.Children.Count > 0)
+                {
+                    var flattened = new List<TreeNode>();
+                    FlattenNodes(node, flattened);
+                    var loadMetrics = _loadTimeMetricsStore.GetAll();
+                    if (flattened.FirstOrDefault(x => loadMetrics.ContainsKey(x.Id) && loadMetrics[x.Id] > _debugRibbonOptions.SlowThresholdMs) != null)
+                        loadTimeWarning = "⚠️";
+                }
+
+
                 // Draw element name in bold white
                 canvas.FontColor = Colors.White;
                 canvas.FontSize = 13;
@@ -744,7 +756,7 @@ internal class DebugOverlayPanel : IWindowOverlayElement
 
                 // Truncate very long names
                 var displayName = name.Length > 40 ? name[..37] + "..." : name;
-                canvas.DrawString(displayName, new RectF(textStartX, y, width - textStartX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(displayName + loadTimeWarning, new RectF(textStartX, y, width - textStartX - 4, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
 
             if (!string.IsNullOrEmpty(details))
@@ -768,7 +780,7 @@ internal class DebugOverlayPanel : IWindowOverlayElement
                 canvas.Font = new Microsoft.Maui.Graphics.Font("Arial", 400, FontStyleType.Normal);
 
                 var detailsText = details.Length > 50 ? details[..47] + "..." : details;
-                canvas.DrawString(detailsText, new RectF(textStartX + nameWidth + 8, y, width - textStartX - nameWidth - 8, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
+                canvas.DrawString(detailsText, new RectF(textStartX + nameWidth + 14, y, width - textStartX - nameWidth - 8, nodeHeight), HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
 
@@ -1683,11 +1695,13 @@ internal class DebugOverlayPanel : IWindowOverlayElement
 
             // Extract element name and details
             var (name, details) = ExtractNodeInfo(cleanLine);
-
+            var (guid, cleanedName) = Plugin.Maui.DebugOverlay.Utils.Extensions.ExtractGuidFromString(name);
+            var (detGuid, cleanedDetails) = Plugin.Maui.DebugOverlay.Utils.Extensions.ExtractGuidFromString(details);
             var node = new TreeNode
             {
-                Name = name,
-                Details = details,
+                Name = cleanedName,
+                Details = cleanedDetails,
+                Id = guid == Guid.Empty ? detGuid : guid,
                 Depth = depth,
                 FullText = cleanLine,
                 IsExpanded = false // Start collapsed by default

@@ -149,6 +149,8 @@ internal class VisualTreeDumpService
             _output.Append($" (Id: {elementId})");
         }
 
+        _output.Append($"#Uid:{element.Id.ToString()}#");
+
         if (isMauiReactorWrapper)
         {
             _output.Append(" [MauiReactor]");
@@ -213,12 +215,12 @@ internal class VisualTreeDumpService
             if (milliseconds >= criticalThresholdMs)
             {
                 icon = "⚠️ ";
-                hexColor = "#FFFF0000"; // red
+                hexColor = "#FFFF9999"; // red
             }
             else if (milliseconds >= slowThresholdMs)
             {
                 icon = "⚠️ ";
-                hexColor = "#FFFFFF00"; // yellow
+                hexColor = "#FFFFFF99"; // yellow
             }
             else
             {

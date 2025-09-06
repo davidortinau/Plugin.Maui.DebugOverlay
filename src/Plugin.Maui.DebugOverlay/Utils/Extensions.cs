@@ -1,4 +1,6 @@
-﻿namespace Plugin.Maui.DebugOverlay.Utils
+﻿using System.Text.RegularExpressions;
+
+namespace Plugin.Maui.DebugOverlay.Utils
 {
     internal static class Extensions
     {
@@ -27,6 +29,31 @@
             string textWithoutColor = formattedText.Substring(0, formattedText.Length - 9).Trim();
 
             return (textWithoutColor, color);
+        }
+
+
+
+        private static readonly Regex UidRegex = new Regex(@"#Uid:([0-9a-fA-F\-]+)#", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Extracts the Guid from a string if present.
+        /// Returns (guid, cleanedDetails).
+        /// If no Guid found, guid will be Guid.Empty.
+        /// </summary>
+        internal static (Guid guid, string cleaned) ExtractGuidFromString(string details)
+        {
+            if (string.IsNullOrEmpty(details))
+                return (Guid.Empty, details);
+
+            var match = UidRegex.Match(details);
+            if (match.Success && Guid.TryParse(match.Groups[1].Value, out var guid))
+            {
+                // Remove the #Uid:...# part
+                var cleaned = UidRegex.Replace(details, "").Trim();
+                return (guid, cleaned);
+            }
+
+            return (Guid.Empty, details);
         }
     }
 }
