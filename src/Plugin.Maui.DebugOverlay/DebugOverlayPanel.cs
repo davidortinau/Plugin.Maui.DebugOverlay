@@ -89,6 +89,18 @@ internal class DebugOverlayPanel : IWindowOverlayElement
     private int _performanceViewPosState = 0;
 
 
+    //needed for scrollbar Treeview
+    private RectF _scrollBarRect;
+    private RectF _scrollThumbRect;
+
+    private bool _isDraggingScrollBar = false;
+    private float _scrollDragStartY = 0;
+    private float _scrollOffsetStart = 0;
+    private float _maxScrollOffset = 0;
+
+    private float _scrollPosition = 0f; // 0..1  
+
+
     public bool IsVisible
     {
         get => _isVisible;
@@ -270,8 +282,9 @@ internal class DebugOverlayPanel : IWindowOverlayElement
             {
                 // Draw tree view UI within content area
                 DrawTreeViewHeader(canvas, contentRect);
-                DrawTreeView(canvas, contentRect);
+                var contentHeight = DrawTreeView(canvas, contentRect);
                 DrawBackButton(canvas, contentRect);
+                DrawScrollBar(canvas, contentRect, contentHeight);
                 DrawScrollButtons(canvas, contentRect);
             }
             else if (_currentState == PanelState.PerformancesView)
@@ -512,7 +525,50 @@ internal class DebugOverlayPanel : IWindowOverlayElement
 
         canvas.RestoreState();
     }
+     
+    private void DrawScrollBar(ICanvas canvas, RectF contentRect, float visibleHeight)
+    {
+        var totalContentHeight = CalculateTreeContentHeight();
 
+        if (totalContentHeight <= visibleHeight)
+            return;
+
+        _maxScrollOffset = Math.Max(0, totalContentHeight - visibleHeight);
+        _scrollOffset = Math.Clamp(_scrollOffset, 0, _maxScrollOffset);
+
+        var barWidth = 12f;
+        var margin = 8f;
+
+        _scrollBarRect = new RectF(
+            contentRect.Right - barWidth - margin,
+            contentRect.Top + margin + 50,
+            barWidth,
+            contentRect.Height - 50 - margin * 2);
+
+        _scrollPosition = _maxScrollOffset > 0
+            ? Math.Clamp(_scrollOffset / _maxScrollOffset, 0f, 1f)
+            : 0f;
+
+        float ratio = visibleHeight / totalContentHeight;
+        float thumbHeight = Math.Max(30, _scrollBarRect.Height * ratio);
+
+        float thumbTrackRange = _scrollBarRect.Height - thumbHeight;
+        float thumbY = _scrollBarRect.Y + thumbTrackRange * _scrollPosition;
+
+        // Siguranță în plus (în caz de rotunjiri)
+        thumbY = Math.Clamp(thumbY, _scrollBarRect.Top, _scrollBarRect.Bottom - thumbHeight);
+
+        _scrollThumbRect = new RectF(_scrollBarRect.X, thumbY, barWidth, thumbHeight);
+
+        canvas.SaveState();
+        canvas.FillColor = Color.FromArgb("#333333");
+        canvas.FillRoundedRectangle(_scrollBarRect, 6);
+
+        canvas.FillColor = Color.FromArgb("#AAAAAA");
+        canvas.FillRoundedRectangle(_scrollThumbRect, 6);
+        canvas.RestoreState();
+    }
+      
     private void DrawScrollButtons(ICanvas canvas, RectF contentRect)
     {
         if (_currentTreeData == null) return;
@@ -566,10 +622,10 @@ internal class DebugOverlayPanel : IWindowOverlayElement
         canvas.RestoreState();
     }
 
-    private void DrawTreeView(ICanvas canvas, RectF contentRect)
+    private float DrawTreeView(ICanvas canvas, RectF contentRect)
     {
         if (_currentTreeData == null || _currentTreeData.Count == 0)
-            return;
+            return 0;
 
         canvas.SaveState();
 
@@ -594,6 +650,8 @@ internal class DebugOverlayPanel : IWindowOverlayElement
         }
 
         canvas.RestoreState();
+
+        return treeContentRect.Height;
     }
 
     private float DrawTreeNode(ICanvas canvas, TreeNode node, float x, float y, float width)
@@ -1111,6 +1169,50 @@ internal class DebugOverlayPanel : IWindowOverlayElement
                 _overlay.Invalidate();
             }
         }
+        else if (_currentState == PanelState.TreeView)
+        {
+            switch (e.Status)
+            {
+                case GlobalPanGesture.GestureStatus.Started:
+                    var startPoint = new Point(e.X, e.Y);
+
+                    // Start dragging if the gesture begins inside scrollbar thumb
+                    if (_scrollThumbRect.Contains(startPoint))
+                    {
+                        _isDraggingScrollBar = true;
+                        _scrollDragStartY = (float)e.Y;
+                        _scrollOffsetStart = _scrollOffset;
+                    }
+                    else
+                    {
+                        _isDraggingScrollBar = false;
+                    }
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Running:
+                    if (_isDraggingScrollBar)
+                    {
+                        // How much user moved relative to thumb track
+                        float deltaY = (float)e.Y - _scrollDragStartY;
+
+                        // Ratio: how many content px per track px
+                        float thumbTrackRange = _scrollBarRect.Height - _scrollThumbRect.Height;
+                        if (thumbTrackRange > 0)
+                        {
+                            float scrollRatio = _maxScrollOffset / thumbTrackRange;
+                            _scrollOffset = Math.Clamp(_scrollOffsetStart + deltaY * scrollRatio, 0, _maxScrollOffset);
+                            _overlay.Invalidate();
+                        }
+                    }
+                    break;
+
+                case GlobalPanGesture.GestureStatus.Completed:
+                    _isDraggingScrollBar = false;
+                    break;
+            }
+        }
+
+
     }
 
     private bool HandleMainMenuTap(Point point, DateTime currentTime, double timeSinceLastButtonTap)
