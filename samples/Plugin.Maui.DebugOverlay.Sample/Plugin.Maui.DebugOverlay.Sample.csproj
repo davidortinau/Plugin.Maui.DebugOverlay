@@ -51,4 +51,10 @@
 		<ProjectReference Include="..\..\src\Plugin.Maui.DebugOverlay\Plugin.Maui.DebugOverlay.csproj" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <MauiXaml Update="SecondPage.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	</ItemGroup>
 </Project>

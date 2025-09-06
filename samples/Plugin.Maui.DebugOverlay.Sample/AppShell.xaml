@@ -10,4 +10,8 @@
         Title="Feature Plugin"
         ContentTemplate="{DataTemplate pages:MainPage}" />
 
+    <!-- SecondPage -->
+    <ShellContent Title="Second Page"
+                  Route="SecondPage"
+                  ContentTemplate="{DataTemplate pages:SecondPage}" />
 </Shell>

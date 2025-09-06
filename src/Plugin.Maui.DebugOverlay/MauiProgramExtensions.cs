@@ -25,11 +25,18 @@ public static class MauiProgramExtensions
 
             if (options.ShowLoadTime)
             {
+                PageHandler.Mapper.AppendToMapping("ClearLoadTimeMetrics", (handler, view) =>
+                {
+                    // Clear metrics as soon as the page is created
+                    loadTimeMetricsStore.Clear();
+                });
+
                 // Add metrics for load VisualElement (including layouts, controls)
                 ViewHandler.ViewMapper.AppendToMapping("MeasureComponentLoad", (handler, view) =>
                 {
                     if (view is VisualElement ve)
                     {
+                        #region track loading
                         var swLoaded = Stopwatch.StartNew();
                         //var swHandlerChanged = Stopwatch.StartNew();
 
@@ -57,10 +64,10 @@ public static class MauiProgramExtensions
                                 loadTimeMetricsStore.Add(ve.Id, swLoaded.Elapsed.TotalMilliseconds);
                             }
                         };
+                        #endregion
                     }
                 });
             }
-
 #endif
 
         });
