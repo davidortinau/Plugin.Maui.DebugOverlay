@@ -2047,7 +2047,7 @@ internal class DebugOverlayPanel : IWindowOverlayElement
 
     private void FpsService_OnFrameTimeCalculated(double frameTimeMs)
     {
-        const double MinFrameTime = 0.1; // ms, pentru a evita diviziunea la zero
+        const double MinFrameTime = 0.1; 
         frameTimeMs = Math.Max(frameTimeMs, MinFrameTime);
 
         // EMA FrameTime

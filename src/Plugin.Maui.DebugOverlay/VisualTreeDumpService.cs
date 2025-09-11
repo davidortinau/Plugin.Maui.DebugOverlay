@@ -124,7 +124,7 @@ internal class VisualTreeDumpService
     {
         if (element == null) return;
         if (options.MaxDepth >= 0 && depth > options.MaxDepth) return;
-
+            
         // Element header with type information
         var indent = new string(' ', depth * IndentSize);
         var elementType = element.GetType();
