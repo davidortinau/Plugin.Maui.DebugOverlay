@@ -4,6 +4,9 @@
              x:Class="Plugin.Maui.DebugOverlay.Sample.MainPage"
              Title="Debug Overlay Plugin">
 
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="> Next Page" Clicked="ToolbarItem_Clicked" />
+    </ContentPage.ToolbarItems>
     <ContentPage.Content>
         <ScrollView>
             <VerticalStackLayout Padding="16"

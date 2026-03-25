@@ -32,7 +32,20 @@
         /// </summary>
         internal bool ShowFrame { get; private set; } = false;
 
+        /// <summary>
+        /// Show load time per ms
+        /// </summary>
+        internal bool ShowLoadTime { get; private set; } = false;
 
+        /// <summary>
+        /// Threshold above which load time is considered slow (in ms).
+        /// </summary>
+        internal int SlowThresholdMs { get; private set; } = 0;
+
+        /// <summary>
+        /// Threshold above which load time is considered critical (in ms).
+        /// </summary>
+        internal int CriticalThresholdMs { get; private set; } = 0;
 
 
         //#########################################################
@@ -91,8 +104,19 @@
             ShowFrame = true;
             return this;
         }
+
+        /// <summary>
+        /// Enable and configure load time per component thresholds.
+        /// </summary>
+        /// <param name="slowThresholdMs">Threshold above which load time is considered slow.</param>
+        /// <param name="criticalThresholdMs">Threshold above which load time is considered critical.</param>
+        /// <returns>The updated <see cref="DebugRibbonOptions"/>.</returns>
+        public DebugRibbonOptions EnableLoadTimePerComponents(int slowThresholdMs = 1000, int criticalThresholdMs = 1250)
+        {
+            ShowLoadTime = true;
+            SlowThresholdMs = slowThresholdMs;
+            CriticalThresholdMs = criticalThresholdMs;
+            return this;
+        }
     }
-
-
-
 }
